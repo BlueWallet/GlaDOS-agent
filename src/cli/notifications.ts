@@ -1,5 +1,8 @@
 import { RequestError } from "@octokit/request-error";
-import { listNotifications } from "../github/notifications.js";
+import {
+  listNotifications,
+  markNotificationDone,
+} from "../github/notifications.js";
 import { parsePullRequest, subjectUrlToWebUrl } from "../github/pr.js";
 import { processReviewRequest } from "../review/process.js";
 
@@ -43,7 +46,10 @@ try {
       console.log(`  ${subjectUrlToWebUrl(n.subject.url)}`);
     }
     console.log();
-    await processReviewRequest(n, { githubToken: token, cursorApiKey });
+    const ok = await processReviewRequest(n, { githubToken: token, cursorApiKey });
+    if (ok) {
+      await markNotificationDone(token, n.id);
+    }
   }
 
   console.log(`${notifications.length} notification(s)`);

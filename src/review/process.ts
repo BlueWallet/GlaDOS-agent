@@ -7,14 +7,15 @@ import type { NotificationThread } from "../types.js";
 import { runAgentReview } from "./agent.js";
 import { buildGithubReview } from "./payload.js";
 
+/** Returns true when the PR was reviewed and posted successfully. */
 export async function processReviewRequest(
   notification: NotificationThread,
   options: { githubToken: string; cursorApiKey: string },
-): Promise<void> {
+): Promise<boolean> {
   const pr = parsePullRequest(notification);
   if (!pr) {
     console.error("Skipping: not a pull request notification");
-    return;
+    return false;
   }
 
   let workDir: string | undefined;
@@ -36,23 +37,20 @@ export async function processReviewRequest(
       options.cursorApiKey,
     );
 
-    console.log('payload=', payload);
-    return;
-
     const githubReview = buildGithubReview(payload);
     console.log(`Verdict: ${githubReview.event}`);
-    console.log(`${githubReview.comments.length} inline comment(s)\n`);
-    console.log(githubReview.body);
+    console.log(`${githubReview.comments.length} inline comment(s)`);
 
     await postGithubReview(options.githubToken, pr, githubReview);
+    return true;
   } catch (err) {
     if (err instanceof CursorAgentError) {
       console.error(`Review startup failed: ${err.message}`);
-      return;
+      return false;
     }
     if (err instanceof Error) {
       console.error(err.message);
-      return;
+      return false;
     }
     throw err;
   } finally {

@@ -3,9 +3,6 @@ export const SEVERITIES = [
   "high",
   "medium",
   "low",
-  "warning",
-  "suggestion",
-  "info",
 ] as const;
 
 export type Severity = (typeof SEVERITIES)[number];
