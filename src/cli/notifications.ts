@@ -32,7 +32,7 @@ try {
     process.exit(0);
   }
 
-  for (const n of notifications.filter((n) => n.reason === "review_requested")) {
+  for (const n of notifications) {
     const unread = n.unread ? "unread" : "read";
     const repo = n.repository?.full_name ?? "?";
     const title = n.subject?.title ?? "(no title)";
@@ -46,8 +46,13 @@ try {
       console.log(`  ${subjectUrlToWebUrl(n.subject.url)}`);
     }
     console.log();
-    const ok = await processReviewRequest(n, { githubToken: token, cursorApiKey });
-    if (ok) {
+
+    if (n.reason === "review_requested") {
+      const ok = await processReviewRequest(n, { githubToken: token, cursorApiKey });
+      if (ok) {
+        await markNotificationDone(token, n.id);
+      }
+    } else {
       await markNotificationDone(token, n.id);
     }
   }
