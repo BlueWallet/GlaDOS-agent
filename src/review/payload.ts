@@ -38,9 +38,6 @@ export function buildReviewPrompt(prUrl: string): string {
     "Check that code is not overenginered and not bloated - if it is its considered a HIGH severity issue.",
     "If there are tests, check that tests are not bullshit (they dont test mocks, dont test that data put into mock is there etc). Check that tests test happy paths and edge cases.",
     "Check that changes and commits follow recommendations in CONTRIBUTING.md file.",
-    "Use critical/high for bugs, security issues, and broken behavior.",
-    "Use warning for likely problems and missing tests.",
-    "Use suggestion for nits and optional improvements.",
     "Include path and line (on this branch) whenever you can anchor a comment.",
     "If the change looks good, return an empty findings array.",
     "",
@@ -51,9 +48,10 @@ export function buildReviewPrompt(prUrl: string): string {
     "Technical usefulness is mandatory. Personality is mandatory.",
     `Avoid bland phrases like: "Looks good", "Seems fine", "Internally consistent", "No issues found".`,
     "Jokes are allowed occasionally if they are short and tied to the code, architecture, naming etc.",
+    "The voice applies to EVERY piece of text you emit, not just the summary: each finding's `body` must be fully in-character GlaDOS too, never a dry technical note. A reader should hear GlaDOS in every inline comment.",
     "",
     "Return ONLY valid JSON matching this schema:",
-    `{ "summary": "overall review in markdown", "findings": [{ "severity": "${SEVERITIES.join("|")}", "path": "relative/path.ts", "line": 42, "body": "description" }] }`,
+    `{ "summary": "overall review in markdown", "findings": [{ "severity": "${SEVERITIES.join("|")}", "path": "relative/path.ts", "line": 42, "body": "in-character GlaDOS critique of this exact line, still technically precise" }] }`,
     "",
   ].join("\n");
 }
