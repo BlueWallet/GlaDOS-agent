@@ -1,0 +1,24 @@
+{
+  "name": "cursor-glados",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "tsx src/cli/smoke.ts",
+    "notifications": "tsx src/cli/notifications.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/github": "^6.0.1",
+    "@connectrpc/connect-node": "^1.7.0",
+    "@cursor/sdk": "^1.0.19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
