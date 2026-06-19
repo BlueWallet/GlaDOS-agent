@@ -21,7 +21,7 @@ export async function processReviewRequest(
   let workDir: string | undefined;
 
   try {
-    console.log(`Cloning ${pr.owner}/${pr.repo}...`);
+    console.log(`  Cloning ${pr.owner}/${pr.repo}...`);
     const workspace = await preparePrWorkspace(
       pr.owner,
       pr.repo,
@@ -30,7 +30,7 @@ export async function processReviewRequest(
     );
     workDir = workspace.workDir;
 
-    console.log(`Reviewing ${pr.prUrl}...`);
+    console.log(`  Reviewing ${pr.prUrl}...`);
     const payload = await runAgentReview(
       workspace.repoDir,
       pr.prUrl,
@@ -38,14 +38,14 @@ export async function processReviewRequest(
     );
 
     const githubReview = buildGithubReview(payload);
-    console.log(`Verdict: ${githubReview.event}`);
-    console.log(`${githubReview.comments.length} inline comment(s)`);
+    console.log(`  Verdict: ${githubReview.event}`);
+    console.log(`  ${githubReview.comments.length} inline comment(s)`);
 
     await postGithubReview(options.githubToken, pr, githubReview);
     return true;
   } catch (err) {
     if (err instanceof CursorAgentError) {
-      console.error(`Review startup failed: ${err.message}`);
+      console.error(`  Review startup failed: ${err.message}`);
       return false;
     }
     if (err instanceof Error) {

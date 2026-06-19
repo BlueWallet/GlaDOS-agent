@@ -45,7 +45,6 @@ try {
     } else if (n.subject?.url) {
       console.log(`  ${subjectUrlToWebUrl(n.subject.url)}`);
     }
-    console.log();
 
     if (n.reason === "review_requested") {
       const ok = await processReviewRequest(n, { githubToken: token, cursorApiKey });

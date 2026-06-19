@@ -28,7 +28,7 @@ export async function postGithubReview(
 
   if (demoted.length > 0) {
     console.error(
-      `${demoted.length} comment(s) not on the diff — moved to review body`,
+      `  ${demoted.length} comment(s) not on the diff — moved to review body`,
     );
   }
 
@@ -50,7 +50,7 @@ export async function postGithubReview(
       comments: anchored.length > 0 ? anchored : undefined,
     });
     console.log(
-      `Posted ${review.event} review (${anchored.length} inline): ${data.html_url}`,
+      `  Posted ${review.event} review (${anchored.length} inline): ${data.html_url}`,
     );
     return;
   } catch (err) {
@@ -61,12 +61,12 @@ export async function postGithubReview(
     // Safety net: validation should make this unreachable, but if GitHub still
     // rejects the inline batch, fall back to a body-only review rather than lose
     // the findings entirely.
-    console.error("Inline batch still rejected, posting body-only...");
+    console.error("  Inline batch still rejected, posting body-only...");
     const { data } = await octokit.rest.pulls.createReview({
       ...baseParams,
       body: appendCommentsToBody(body, anchored),
     });
-    console.log(`Posted ${review.event} review (no inline): ${data.html_url}`);
+    console.log(`  Posted ${review.event} review (no inline): ${data.html_url}`);
   }
 }
 
