@@ -60,6 +60,8 @@ cli/notifications.ts
        → rm temp workspace
 ```
 
+**Tests:** GLaDOS does not run the test suite or install deps to execute tests. The PR's CI runs tests; the agent reviews test *code* by reading files only. This is enforced in `buildReviewPrompt()`.
+
 **Approve vs request changes:** `critical` or `high` findings → `REQUEST_CHANGES`; otherwise `APPROVE`.
 
 **Inline comments:** findings with `path` + `line` become review comments (`side: RIGHT`). The agent reviews the whole repo, so it can cite lines outside the diff — but GitHub only accepts RIGHT-side comments on lines present in the PR diff, and one bad anchor 422s the *entire* inline batch. So before posting, `github/diff.ts` → `getCommentableLines()` parses the PR diff hunks and `reviews.ts` filters comments against it: anchorable lines post inline, the rest are demoted into the review body (`appendCommentsToBody`). Findings without `path`/`line` go in the body too. A body-only 422 fallback remains as a last resort.
