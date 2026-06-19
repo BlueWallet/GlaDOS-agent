@@ -1,7 +1,6 @@
 {
-  "name": "cursor-glados",
+  "name": "glados-cursor",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "scripts": {
     "smoke": "tsx src/cli/smoke.ts",

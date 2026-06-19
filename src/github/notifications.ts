@@ -23,4 +23,5 @@ export async function markNotificationDone(
   await octokit.rest.activity.markThreadAsDone({
     thread_id: Number(threadId),
   });
+  console.log(`  (notification marked as done)`);
 }

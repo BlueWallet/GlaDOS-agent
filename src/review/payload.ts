@@ -36,7 +36,7 @@ export function buildReviewPrompt(prUrl: string): string {
     "Try to figure out proposed change intention (i.e. is it a new feature? is it a fix for a bug?), and verify if its being implemented correctly, with no bugs or unwanted side-effects. Highlight any possible bugs, runtime errors, security vulnerabilities, or logical flaws in the code. ",
     "Do not tell whats good.",
     "Check that code is not overenginered and not bloated - if it is its considered a HIGH severity issue.",
-    "If there are tests, check that tests are not bullshit (they dont test mocks, dont test that data put into mock is there etc). Check that tests test happy paths and edge cases.",
+    "If there are tests, check that tests are not bullshit (they dont test mocks, dont test that data put into mock is there etc). Check that tests test happy paths and edge cases. Any such cases are considered HIGH severity issues.",
     "Check that changes and commits follow recommendations in CONTRIBUTING.md file.",
     "Include path and line (on this branch) whenever you can anchor a comment.",
     "If the change looks good, return an empty findings array.",
