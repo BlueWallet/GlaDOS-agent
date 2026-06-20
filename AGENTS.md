@@ -53,12 +53,15 @@ cli/notifications.ts
   → filter reason === "review_requested"
   → review/process.processReviewRequest()  (per notification)
        → github/pr.parsePullRequest()
+       → github/pr.isReviewRequestedForUser()  # skip if not on pending reviewer list
        → git/workspace.preparePrWorkspace()   # /tmp/glados-*/<repo>
        → review/agent.runAgentReview()        # local Agent.prompt
        → review/payload.buildGithubReview()   # APPROVE vs REQUEST_CHANGES
        → github/reviews.postGithubReview()
        → rm temp workspace
 ```
+
+**Duplicate protection:** before cloning, `isReviewRequestedForUser()` calls `GET .../pulls/{n}/requested_reviewers`. GitHub only lists users with a **pending** review request — once you submit a review you drop off; if someone re-requests you, you're back. Review only when the GLADOS user is on that list.
 
 **Tests:** GLaDOS does not run the test suite or install deps to execute tests. The PR's CI runs tests; the agent reviews test *code* by reading files only. This is enforced in `buildReviewPrompt()`.
 

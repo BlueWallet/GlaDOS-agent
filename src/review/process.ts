@@ -1,7 +1,7 @@
 import { CursorAgentError } from "@cursor/sdk";
 import { rm } from "node:fs/promises";
 import { preparePrWorkspace } from "../git/workspace.js";
-import { parsePullRequest } from "../github/pr.js";
+import { parsePullRequest, isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import type { NotificationThread } from "../types.js";
 import { runAgentReview } from "./agent.js";
@@ -21,6 +21,12 @@ export async function processReviewRequest(
   let workDir: string | undefined;
 
   try {
+    const requested = await isReviewRequestedForUser(options.githubToken, pr);
+    if (!requested) {
+      console.log("  Skipping: review not requested for this user");
+      return true;
+    }
+
     console.log(`  Cloning ${pr.owner}/${pr.repo}...`);
     const workspace = await preparePrWorkspace(
       pr.owner,

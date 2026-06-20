@@ -1,3 +1,4 @@
+import * as github from "@actions/github";
 import type { NotificationThread, PullRequestRef } from "../types.js";
 
 export function parsePullRequest(
@@ -22,4 +23,22 @@ export function subjectUrlToWebUrl(subjectUrl: string): string {
   return subjectUrl
     .replace("https://api.github.com/repos/", "https://github.com/")
     .replace("/pulls/", "/pull/");
+}
+
+/** Whether the authenticated user is on the PR's pending reviewer list. */
+export async function isReviewRequestedForUser(
+  githubToken: string,
+  pr: Pick<PullRequestRef, "owner" | "repo" | "prNumber">,
+): Promise<boolean> {
+  const octokit = github.getOctokit(githubToken);
+  const [{ data: user }, { data: requested }] = await Promise.all([
+    octokit.rest.users.getAuthenticated(),
+    octokit.rest.pulls.listRequestedReviewers({
+      owner: pr.owner,
+      repo: pr.repo,
+      pull_number: pr.prNumber,
+    }),
+  ]);
+
+  return requested.users.some((u) => u.login === user.login);
 }
