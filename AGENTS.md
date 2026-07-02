@@ -1,17 +1,17 @@
 # cursor-glados — agent guide
 
-GLaDOS polls GitHub for review-request notifications, clones each PR locally, runs a Cursor SDK agent review, and posts the result back to GitHub (summary + inline comments, approve or request changes).
+GLaDOS finds open PRs with a pending review request for the authenticated user (GitHub Search), clones each PR locally, runs a Cursor SDK agent review, and posts the result back to GitHub (summary + inline comments, approve or request changes). The notifications CLI also clears the GitHub notification inbox.
 
 TypeScript, ESM (`"type": "module"`), Node ≥ 22.13. Run scripts with `tsx`.
 
 ## Commands
 
 ```bash
-export GLADOS_TOKEN='ghp_...'      # GitHub PAT: notifications + repo + pull_requests
+export GLADOS_TOKEN='ghp_...'      # GitHub PAT: search + notifications + repo + pull_requests
 export CURSOR_API_KEY='cursor_...'
 
-npm run notifications              # poll review_requested notifications, review each PR
-npm run notifications -- --all     # include read notifications
+npm run notifications              # review open PRs with pending review requests, clear inbox
+npm run notifications -- --all     # include read notifications when listing inbox
 npm run smoke                      # local Cursor SDK smoke test (cwd = this repo)
 npm run typecheck
 ```
@@ -25,7 +25,7 @@ Only `src/cli/` contains runnable entrypoints. Everything else is library code i
 ```
 src/
   cli/
-    notifications.ts    # entrypoint: list notifications → review each review_requested
+    notifications.ts    # entrypoint: review pending PRs, then list + clear notifications
     smoke.ts            # entrypoint: one-shot local Agent.prompt smoke test
 
   types.ts              # NotificationThread, PullRequestRef
@@ -34,13 +34,13 @@ src/
     workspace.ts        # clone repo to temp dir, fetch + checkout PR branch
 
   github/
-    notifications.ts    # listNotifications() — paginated /notifications API
-    pr.ts               # parsePullRequest(), subjectUrlToWebUrl()
+    notifications.ts    # listNotifications(), markNotificationDone()
+    pr.ts               # listReviewRequestedPullRequests(), isReviewRequestedForUser(), subjectUrlToWebUrl()
     diff.ts             # getCommentableLines() — RIGHT-side lines that accept comments
     reviews.ts          # postGithubReview() — validate vs diff, then createReview
 
   review/
-    process.ts          # processReviewRequest() — orchestrates full review flow
+    process.ts          # processPrReview() — orchestrates full review flow
     agent.ts            # runAgentReview() — Cursor SDK Agent.prompt on local cwd
     payload.ts          # prompt, JSON parse, GitHub review formatting, personality hook
 ```
@@ -49,17 +49,20 @@ src/
 
 ```
 cli/notifications.ts
-  → github/notifications.listNotifications()
-  → filter reason === "review_requested"
-  → review/process.processReviewRequest()  (per notification)
-       → github/pr.parsePullRequest()
+  → parallel:
+       github/pr.listReviewRequestedPullRequests()   # search: is:open is:pr review-requested:@me
+       github/notifications.listNotifications()
+  → review/process.processPrReview()  (per PR from search)
        → github/pr.isReviewRequestedForUser()  # skip if not on pending reviewer list
        → git/workspace.preparePrWorkspace()   # /tmp/glados-*/<repo>
        → review/agent.runAgentReview()        # local Agent.prompt
        → review/payload.buildGithubReview()   # APPROVE vs REQUEST_CHANGES
        → github/reviews.postGithubReview()
        → rm temp workspace
+  → github/notifications.markNotificationDone()  (per inbox thread — inbox cleanup only)
 ```
+
+**Review queue:** `listReviewRequestedPullRequests()` uses GitHub Search, not the notifications API. Search reflects pending review state directly; the inbox is cleared separately and does not drive which PRs get reviewed.
 
 **Duplicate protection:** before cloning, `isReviewRequestedForUser()` calls `GET .../pulls/{n}/requested_reviewers`. GitHub only lists users with a **pending** review request — once you submit a review you drop off; if someone re-requests you, you're back. Review only when the GLADOS user is on that list.
 
@@ -77,7 +80,7 @@ cli/notifications.ts
 | Severity levels (single source of truth) | `review/payload.ts` → `SEVERITIES` const + `Severity` type |
 | GLaDOS voice before posting | `review/payload.ts` → `applyPersonality()` |
 | Clone/checkout behavior | `git/workspace.ts` |
-| GitHub API (notifications, PR parse, post review) | `github/` |
+| GitHub API (search, notifications, PR helpers, post review) | `github/` |
 | Orchestration only — no business logic | `review/process.ts` |
 
 Tune the **review prompt** and **personality** independently: prompt asks for structured JSON; `applyPersonality()` rewrites text at post time.
@@ -94,7 +97,7 @@ Tune the **review prompt** and **personality** independently: prompt asks for st
 
 | Variable | Used for |
 |----------|----------|
-| `GLADOS_TOKEN` | GitHub API (notifications, clone auth, post reviews) |
+| `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, post reviews) |
 | `CURSOR_API_KEY` | Cursor SDK local agent runs |
 
 `GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent fine-grained permissions).

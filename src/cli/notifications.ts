@@ -3,8 +3,11 @@ import {
   listNotifications,
   markNotificationDone,
 } from "../github/notifications.js";
-import { parsePullRequest, subjectUrlToWebUrl } from "../github/pr.js";
-import { processReviewRequest } from "../review/process.js";
+import {
+  listReviewRequestedPullRequests,
+  subjectUrlToWebUrl,
+} from "../github/pr.js";
+import { processPrReview } from "../review/process.js";
 
 const token = process.env.GLADOS_TOKEN;
 if (!token) {
@@ -23,36 +26,39 @@ if (!cursorApiKey) {
 const showAll = process.argv.includes("--all");
 
 try {
-  const { login, notifications } = await listNotifications(token, showAll);
+  const [{ login, notifications }, reviewRequestedPrs] = await Promise.all([
+    listNotifications(token, showAll),
+    listReviewRequestedPullRequests(token),
+  ]);
+
+  for (const pr of reviewRequestedPrs) {
+    console.log(`  ${pr.owner}/${pr.repo} #${pr.prNumber}`);
+    console.log(`  ${pr.prUrl}`);
+    await processPrReview(pr, { githubToken: token, cursorApiKey });
+    console.log();
+  }
 
   console.log(`Notifications for @${login}${showAll ? " (including read)" : ""}\n`);
-
-  if (notifications.length === 0) {
-    console.log("No notifications.");
-    process.exit(0);
-  }
 
   for (const n of notifications) {
     const unread = n.unread ? "unread" : "read";
     const repo = n.repository?.full_name ?? "?";
     const title = n.subject?.title ?? "(no title)";
-    const pr = parsePullRequest(n);
 
     console.log(`[${unread}] ${n.reason} · ${n.subject?.type ?? "?"}`);
     console.log(`  ${repo} — ${title}`);
-    if (pr) {
-      console.log(`  ${pr.prUrl}`);
-    } else if (n.subject?.url) {
+    if (n.subject?.url) {
       console.log(`  ${subjectUrlToWebUrl(n.subject.url)}`);
     }
 
-    if (n.reason === "review_requested") {
-      const ok = await processReviewRequest(n, { githubToken: token, cursorApiKey });
-      if (ok) {
+
+    // See: https://docs.github.com/en/rest/activity/notifications?apiVersion=2022-11-28#about-notifications
+    switch (n.reason) {
+      case "assign": // You were assigned to the issue.
+      case "mention": // You were specifically @mentioned in the content.
+      default:
         await markNotificationDone(token, n.id);
-      }
-    } else {
-      await markNotificationDone(token, n.id);
+        break;
     }
   }
 

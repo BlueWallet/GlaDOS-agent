@@ -38,7 +38,7 @@ export function buildReviewPrompt(prUrl: string): string {
     "Do not tell whats good.",
     "Check that code is not overenginered and not bloated - if it is its considered a HIGH severity issue.",
     "If there are tests, check that tests are not bullshit (they dont test mocks, dont test that data put into mock is there etc). Check that tests test happy paths and edge cases. Any such cases are considered HIGH severity issues.",
-    "Check that changes and commits follow recommendations in CONTRIBUTING.md file.",
+    "If CONTRIBUTING.md exists, check that changes and commits follow its recommendations.",
     "Include path and line (on this branch) whenever you can anchor a comment.",
     "If the change looks good, return an empty findings array.",
     "",

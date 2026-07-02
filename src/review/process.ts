@@ -1,23 +1,17 @@
 import { CursorAgentError } from "@cursor/sdk";
 import { rm } from "node:fs/promises";
 import { preparePrWorkspace } from "../git/workspace.js";
-import { parsePullRequest, isReviewRequestedForUser } from "../github/pr.js";
+import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
-import type { NotificationThread } from "../types.js";
+import type { PullRequestRef } from "../types.js";
 import { runAgentReview } from "./agent.js";
 import { buildGithubReview } from "./payload.js";
 
 /** Returns true when the PR was reviewed and posted successfully. */
-export async function processReviewRequest(
-  notification: NotificationThread,
+export async function processPrReview(
+  pr: PullRequestRef,
   options: { githubToken: string; cursorApiKey: string },
 ): Promise<boolean> {
-  const pr = parsePullRequest(notification);
-  if (!pr) {
-    console.error("Skipping: not a pull request notification");
-    return false;
-  }
-
   let workDir: string | undefined;
 
   try {
