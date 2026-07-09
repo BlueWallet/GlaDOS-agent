@@ -10,7 +10,7 @@
   "dependencies": {
     "@actions/github": "^6.0.1",
     "@connectrpc/connect-node": "^1.7.0",
-    "@cursor/sdk": "^1.0.19"
+    "@cursor/sdk": "^1.0.23"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
