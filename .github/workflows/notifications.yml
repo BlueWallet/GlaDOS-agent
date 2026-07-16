@@ -1,0 +1,31 @@
+name: Notifications
+
+on:
+  schedule:
+    # Every 15 minutes, offset from :00/:15/:30/:45 to avoid worker contention
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: notifications
+  cancel-in-progress: true
+
+jobs:
+  notifications:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Review pending PRs
+        env:
+          GLADOS_TOKEN: ${{ secrets.GLADOS_TOKEN }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: npm run notifications
