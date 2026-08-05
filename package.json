@@ -5,6 +5,7 @@
   "scripts": {
     "smoke": "tsx src/cli/smoke.ts",
     "notifications": "tsx src/cli/notifications.ts",
+    "test": "tsx --test src/git/workspace.test.ts src/github/pr.test.ts src/review/agent.test.ts src/review/payload.test.ts src/review/threads.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

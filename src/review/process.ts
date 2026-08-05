@@ -1,61 +1,78 @@
 import { CursorAgentError } from "@cursor/sdk";
-import { rm } from "node:fs/promises";
-import { preparePrWorkspace } from "../git/workspace.js";
+import { withPrLock, withPrWorkspace } from "../git/workspace.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import type { PullRequestRef } from "../types.js";
 import { runAgentReview } from "./agent.js";
 import { buildGithubReview } from "./payload.js";
+import { processReviewThreads } from "./thread-process.js";
+import {
+  formatSettledContext,
+  suppressSettledFindings,
+} from "./threads.js";
 
-/** Returns true when the PR was reviewed and posted successfully. */
+/** Run Phase A thread handling, then the requested full PR review. */
 export async function processPrReview(
   pr: PullRequestRef,
   options: { githubToken: string; cursorApiKey: string },
 ): Promise<boolean> {
-  let workDir: string | undefined;
-
   try {
-    const requested = await isReviewRequestedForUser(options.githubToken, pr);
-    if (!requested) {
-      console.log("  Skipping: review not requested for this user");
-      return true;
-    }
+    return await withPrLock(pr.owner, pr.repo, pr.prNumber, async () => {
+      const requested = await isReviewRequestedForUser(options.githubToken, pr);
+      if (!requested) {
+        console.log("  Skipping: review not requested for this user");
+        return true;
+      }
 
-    console.log(`  Cloning ${pr.owner}/${pr.repo}...`);
-    const workspace = await preparePrWorkspace(
-      pr.owner,
-      pr.repo,
-      pr.prNumber,
-      options.githubToken,
-    );
-    workDir = workspace.workDir;
+      console.log(`  Cloning ${pr.owner}/${pr.repo}...`);
+      return withPrWorkspace(
+        pr.owner,
+        pr.repo,
+        pr.prNumber,
+        options.githubToken,
+        async (repoDir) => {
+          const threadResult = await processReviewThreads(pr, {
+            ...options,
+            repoDir,
+          });
 
-    console.log(`  Reviewing ${pr.prUrl}...`);
-    const payload = await runAgentReview(
-      workspace.repoDir,
-      pr.prUrl,
-      options.cursorApiKey,
-    );
+          console.log(`  Reviewing ${pr.prUrl} ...`);
+          const payload = await runAgentReview(
+            repoDir,
+            pr.prUrl,
+            options.cursorApiKey,
+            formatSettledContext(threadResult.settled),
+          );
+          const filtered = suppressSettledFindings(
+            payload,
+            threadResult.settled,
+          );
+          const suppressed =
+            payload.findings.length - filtered.findings.length;
+          if (suppressed > 0) {
+            console.log(`  Suppressed ${suppressed} settled finding(s)`);
+          }
 
-    const githubReview = buildGithubReview(payload);
-    console.log(`  Verdict: ${githubReview.event}`);
-    console.log(`  ${githubReview.comments.length} inline comment(s)`);
-
-    await postGithubReview(options.githubToken, pr, githubReview);
-    return true;
+          const review = buildGithubReview(filtered);
+          console.log(`  Verdict: ${review.event}`);
+          console.log(`  ${review.comments.length} inline comment(s)`);
+          await postGithubReview(options.githubToken, pr, review);
+          return true;
+        },
+      );
+    });
   } catch (err) {
-    if (err instanceof CursorAgentError) {
-      console.error(`  Review startup failed: ${err.message}`);
-      return false;
-    }
-    if (err instanceof Error) {
-      console.error(err.message);
-      return false;
-    }
+    logReviewError(err);
+    return false;
+  }
+}
+
+function logReviewError(err: unknown): void {
+  if (err instanceof CursorAgentError) {
+    console.error(`  Review startup failed: ${err.message}`);
+  } else if (err instanceof Error) {
+    console.error(err.message);
+  } else {
     throw err;
-  } finally {
-    if (workDir) {
-      await rm(workDir, { recursive: true, force: true });
-    }
   }
 }

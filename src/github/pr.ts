@@ -7,6 +7,35 @@ export function subjectUrlToWebUrl(subjectUrl: string): string {
     .replace("/pulls/", "/pull/");
 }
 
+/** Parse owner/repo/number from a notifications subject PR API URL. */
+export function pullRequestRefFromApiUrl(
+  apiUrl: string,
+): Omit<PullRequestRef, "prUrl"> | null {
+  const match = apiUrl.match(
+    /\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)(?:\/|$)/,
+  );
+  if (!match) return null;
+  return {
+    owner: match[1]!,
+    repo: match[2]!,
+    prNumber: Number(match[3]),
+  };
+}
+
+/** Treat any PR notification as a wake-up; GitHub coalesces PR activity. */
+export function pullRequestRefFromNotification(
+  subjectType: string | null | undefined,
+  subjectUrl: string | null | undefined,
+): PullRequestRef | null {
+  if (subjectType !== "PullRequest" || !subjectUrl) return null;
+  const ref = pullRequestRefFromApiUrl(subjectUrl);
+  if (!ref) return null;
+  return {
+    ...ref,
+    prUrl: subjectUrlToWebUrl(subjectUrl),
+  };
+}
+
 /** Open PRs where the authenticated user has a pending review request. */
 export async function listReviewRequestedPullRequests(
   githubToken: string,

@@ -28,7 +28,23 @@ export function applyPersonality(text: string): string {
   return text;
 }
 
-export function buildReviewPrompt(prUrl: string): string {
+/** Remove markers reserved for controlled review-thread state. */
+export function stripGladosControlMarkers(text: string): string {
+  return text
+    .replace(/<!--\s*glados:(?:agree|reply-to:[^>]*)\s*-->/gi, "")
+    .trim();
+}
+
+function applySafePersonality(text: string): string {
+  return stripGladosControlMarkers(
+    applyPersonality(stripGladosControlMarkers(text)),
+  );
+}
+
+export function buildReviewPrompt(
+  prUrl: string,
+  settledContext = "",
+): string {
   return [
     `Review pull request ${prUrl}.`,
     "You are on the PR branch with full repo access.",
@@ -43,6 +59,9 @@ export function buildReviewPrompt(prUrl: string): string {
     "If the change looks good, return an empty findings array.",
     "If the overall change is very low quality, end the summary with a short GLaDOS-style insult. Otherwise do not.",
     "",
+    ...(settledContext
+      ? [settledContext, ""]
+      : []),
     "Vibe:",
     "110% over-the-top roleplay: always sound like GlaDOS from Portal conducting tests and doing sarcastic remarks, Absolute immersion into the world of video game Portal.",
     "You are delighted that you have job to do and have tests and experiments to run.",
@@ -119,13 +138,13 @@ export function buildGithubReview(payload: ReviewPayload): {
     ? "REQUEST_CHANGES"
     : "APPROVE";
 
-  let body = applyPersonality(payload.summary);
+  let body = applySafePersonality(payload.summary);
 
   if (unanchored.length > 0) {
     body += "\n\n### Additional findings\n";
     for (const finding of unanchored) {
       const prefix = finding.path ? `\`${finding.path}\`: ` : "";
-      body += `\n- **[${finding.severity.toUpperCase()}]** ${prefix}${applyPersonality(finding.body)}`;
+      body += `\n- **[${finding.severity.toUpperCase()}]** ${prefix}${applySafePersonality(finding.body)}`;
     }
   }
 
@@ -133,7 +152,7 @@ export function buildGithubReview(payload: ReviewPayload): {
     path: finding.path,
     line: finding.line!,
     side: "RIGHT" as const,
-    body: applyPersonality(
+    body: applySafePersonality(
       `**[${finding.severity.toUpperCase()}]** ${finding.body}`,
     ),
   }));
