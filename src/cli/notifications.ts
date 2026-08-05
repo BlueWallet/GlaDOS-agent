@@ -5,9 +5,11 @@ import {
 } from "../github/notifications.js";
 import {
   listReviewRequestedPullRequests,
+  pullRequestRefFromNotification,
   subjectUrlToWebUrl,
 } from "../github/pr.js";
 import { processPrReview } from "../review/process.js";
+import { processPrThreadReplies } from "../review/thread-process.js";
 
 const token = process.env.GLADOS_TOKEN;
 if (!token) {
@@ -34,7 +36,10 @@ try {
   for (const pr of reviewRequestedPrs) {
     console.log(`  ${pr.owner}/${pr.repo} #${pr.prNumber}`);
     console.log(`  ${pr.prUrl}`);
-    await processPrReview(pr, { githubToken: token, cursorApiKey });
+    await processPrReview(pr, {
+      githubToken: token,
+      cursorApiKey,
+    });
     console.log();
   }
 
@@ -51,6 +56,27 @@ try {
       console.log(`  ${subjectUrlToWebUrl(n.subject.url)}`);
     }
 
+    // GitHub coalesces all activity for a PR into one notification. Use the
+    // notification only as a wake-up and inspect all GLaDOS threads remotely.
+    const notifiedPr = pullRequestRefFromNotification(
+      n.subject?.type,
+      n.subject?.url,
+    );
+    if (notifiedPr) {
+      console.log(
+        `  Checking review threads on ${notifiedPr.owner}/${notifiedPr.repo}#${notifiedPr.prNumber}`,
+      );
+      const ok = await processPrThreadReplies(notifiedPr, {
+        githubToken: token,
+        cursorApiKey,
+      });
+      if (ok) {
+        await markNotificationDone(token, n.id);
+      } else {
+        console.error("  Leaving notification for retry");
+      }
+      continue;
+    }
 
     // See: https://docs.github.com/en/rest/activity/notifications?apiVersion=2022-11-28#about-notifications
     switch (n.reason) {
