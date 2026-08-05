@@ -17,8 +17,10 @@ npm run notifications              # Phase A + Phase B for pending reviews; Phas
 npm run notifications -- --all     # include read notifications when listing inbox
 npm run smoke                      # local Cursor SDK smoke test (cwd = this repo)
 npm test                           # unit tests (node:test via tsx)
-npm run typecheck
+npm run typecheck                  # TypeScript check (CI "lint")
 ```
+
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `typecheck`, and `test` on PRs and pushes to `master`.
 
 `@connectrpc/connect-node` is required at runtime by `@cursor/sdk` but is not bundled — keep it in `package.json`.
 
