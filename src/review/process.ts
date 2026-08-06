@@ -5,13 +5,12 @@ import { postGithubReview } from "../github/reviews.js";
 import type { PullRequestRef } from "../types.js";
 import { runAgentReview } from "./agent.js";
 import { buildGithubReview } from "./payload.js";
-import { processReviewThreads } from "./thread-process.js";
-import {
-  formatSettledContext,
-  suppressSettledFindings,
-} from "./threads.js";
 
-/** Run Phase A thread handling, then the requested full PR review. */
+/**
+ * Core full PR review. No thread-reply knowledge.
+ * CLI uses `processPrReviewWithThreadReplies` from `thread-replies/` when that
+ * feature is enabled; call this directly to run reviews without it.
+ */
 export async function processPrReview(
   pr: PullRequestRef,
   options: { githubToken: string; cursorApiKey: string },
@@ -31,29 +30,13 @@ export async function processPrReview(
         pr.prNumber,
         options.githubToken,
         async (repoDir) => {
-          const threadResult = await processReviewThreads(pr, {
-            ...options,
-            repoDir,
-          });
-
           console.log(`  Reviewing ${pr.prUrl} ...`);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
-            formatSettledContext(threadResult.settled),
           );
-          const filtered = suppressSettledFindings(
-            payload,
-            threadResult.settled,
-          );
-          const suppressed =
-            payload.findings.length - filtered.findings.length;
-          if (suppressed > 0) {
-            console.log(`  Suppressed ${suppressed} settled finding(s)`);
-          }
-
-          const review = buildGithubReview(filtered);
+          const review = buildGithubReview(payload);
           console.log(`  Verdict: ${review.event}`);
           console.log(`  ${review.comments.length} inline comment(s)`);
           await postGithubReview(options.githubToken, pr, review);
@@ -67,7 +50,7 @@ export async function processPrReview(
   }
 }
 
-function logReviewError(err: unknown): void {
+export function logReviewError(err: unknown): void {
   if (err instanceof CursorAgentError) {
     console.error(`  Review startup failed: ${err.message}`);
   } else if (err instanceof Error) {

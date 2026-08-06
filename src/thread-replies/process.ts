@@ -8,17 +8,25 @@ import {
   resolveReviewThread,
   type ReviewThread,
 } from "../github/threads.js";
+import { isReviewRequestedForUser } from "../github/pr.js";
+import { postGithubReview } from "../github/reviews.js";
+import { runAgentReview } from "../review/agent.js";
+import { buildGithubReview } from "../review/payload.js";
+import { logReviewError } from "../review/process.js";
 import type { PullRequestRef } from "../types.js";
 import { runThreadReplies } from "./agent.js";
 import {
   assertCurrentThreadSnapshots,
   formatReplyBody,
+  formatSettledContext,
   isAwaitingThread,
   isResolutionPending,
   listSettledFindings,
   needsResolveRetry,
+  sanitizeReviewForPost,
+  suppressSettledFindings,
   type SettledFinding,
-} from "./threads.js";
+} from "./logic.js";
 
 export interface ThreadProcessResult {
   settled: SettledFinding[];
@@ -34,6 +42,66 @@ interface ThreadOptions {
   githubToken: string;
   cursorApiKey: string;
   repoDir?: string;
+}
+
+/**
+ * Full review with Phase A first: thread replies, then core review with
+ * settled-finding suppression. This is the feature entrypoint for
+ * review-requested PRs — swap for `processPrReview` to disable the feature.
+ */
+export async function processPrReviewWithThreadReplies(
+  pr: PullRequestRef,
+  options: { githubToken: string; cursorApiKey: string },
+): Promise<boolean> {
+  try {
+    return await withPrLock(pr.owner, pr.repo, pr.prNumber, async () => {
+      const requested = await isReviewRequestedForUser(options.githubToken, pr);
+      if (!requested) {
+        console.log("  Skipping: review not requested for this user");
+        return true;
+      }
+
+      console.log(`  Cloning ${pr.owner}/${pr.repo}...`);
+      return withPrWorkspace(
+        pr.owner,
+        pr.repo,
+        pr.prNumber,
+        options.githubToken,
+        async (repoDir) => {
+          const threadResult = await processReviewThreads(pr, {
+            ...options,
+            repoDir,
+          });
+
+          console.log(`  Reviewing ${pr.prUrl} ...`);
+          const payload = await runAgentReview(
+            repoDir,
+            pr.prUrl,
+            options.cursorApiKey,
+            formatSettledContext(threadResult.settled),
+          );
+          const filtered = suppressSettledFindings(
+            payload,
+            threadResult.settled,
+          );
+          const suppressed =
+            payload.findings.length - filtered.findings.length;
+          if (suppressed > 0) {
+            console.log(`  Suppressed ${suppressed} settled finding(s)`);
+          }
+
+          const review = sanitizeReviewForPost(buildGithubReview(filtered));
+          console.log(`  Verdict: ${review.event}`);
+          console.log(`  ${review.comments.length} inline comment(s)`);
+          await postGithubReview(options.githubToken, pr, review);
+          return true;
+        },
+      );
+    });
+  } catch (err) {
+    logReviewError(err);
+    return false;
+  }
 }
 
 /** Phase A against an existing checkout. */
