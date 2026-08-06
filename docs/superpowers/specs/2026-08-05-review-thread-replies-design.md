@@ -18,14 +18,14 @@ GLaDOS must respond when humans reply on its review comment threads: agree (shor
 
 ```
 cli/notifications.ts
- ├─ review-requested PRs → processPrReview()
- │    1. preparePrWorkspace()
- │    2. processReviewThreads()   # Phase A
- │    3. runAgentReview(+ settled) # Phase B
- │    4. postGithubReview()
+ ├─ review-requested PRs → processPrReviewWithThreadReplies()
+ │    1. withPrWorkspace()
+ │    2. processReviewThreads()      # Phase A (thread-replies/)
+ │    3. runAgentReview(+ settled)   # core review/
+ │    4. suppress + sanitize + post
  │
- └─ inbox: reply on a GLaDOS review thread
-      → processReviewThreads() only
+ └─ inbox: PullRequest notification wake-up
+      → processPrThreadReplies() only
       → markNotificationDone() only after successful processing
 ```
 
@@ -71,14 +71,15 @@ Open / disagreed threads are **not** suppressors; new findings on the same topic
 | Module | Responsibility |
 |--------|----------------|
 | `github/threads.ts` | List PR review threads (GraphQL), create thread reply, resolve thread; identify authenticated user |
-| `review/threads.ts` | Pure: awaiting vs settled classification; prompt/parse for Phase A; format settled context for Phase B |
-| `review/agent.ts` | `runThreadReplies()` for Phase A |
-| `review/thread-process.ts` | Orchestrate Phase A thread reads, replies, resolution and retries |
-| `review/process.ts` | Run Phase A, pass settled context into Phase B, post full review |
-| `cli/notifications.ts` | Treat every PR notification as a fresh Phase A wake-up |
+| `thread-replies/` | Isolated feature folder (public API via `index.ts`) |
+| `thread-replies/logic.ts` | Pure: awaiting vs settled classification; prompt/parse for Phase A; format settled context; suppress |
+| `thread-replies/agent.ts` | `runThreadReplies()` for Phase A |
+| `thread-replies/process.ts` | Phase A orchestration + `processPrReviewWithThreadReplies` composer |
+| `review/` | Core PR review only — no thread-reply imports |
+| `cli/notifications.ts` | Wires features; every PR notification is a Phase A wake-up |
 
-Keep `process.ts` as wiring only; GitHub I/O in `github/`; prompt/parse and
-classification in `review/threads.ts`.
+Keep feature logic inside `thread-replies/`; GitHub I/O in `github/`; core
+review stays replaceable without knowing about threads.
 
 ## GitHub API notes
 

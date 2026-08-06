@@ -28,22 +28,13 @@ export function applyPersonality(text: string): string {
   return text;
 }
 
-/** Remove markers reserved for controlled review-thread state. */
-export function stripGladosControlMarkers(text: string): string {
-  return text
-    .replace(/<!--\s*glados:(?:agree|reply-to:[^>]*)\s*-->/gi, "")
-    .trim();
-}
-
-function applySafePersonality(text: string): string {
-  return stripGladosControlMarkers(
-    applyPersonality(stripGladosControlMarkers(text)),
-  );
-}
-
+/**
+ * Build the full-review agent prompt.
+ * `extraContext` is an optional appendix from other features (no semantics here).
+ */
 export function buildReviewPrompt(
   prUrl: string,
-  settledContext = "",
+  extraContext = "",
 ): string {
   return [
     `Review pull request ${prUrl}.`,
@@ -59,8 +50,8 @@ export function buildReviewPrompt(
     "If the change looks good, return an empty findings array.",
     "If the overall change is very low quality, end the summary with a short GLaDOS-style insult. Otherwise do not.",
     "",
-    ...(settledContext
-      ? [settledContext, ""]
+    ...(extraContext
+      ? [extraContext, ""]
       : []),
     "Vibe:",
     "110% over-the-top roleplay: always sound like GlaDOS from Portal conducting tests and doing sarcastic remarks, Absolute immersion into the world of video game Portal.",
@@ -138,13 +129,13 @@ export function buildGithubReview(payload: ReviewPayload): {
     ? "REQUEST_CHANGES"
     : "APPROVE";
 
-  let body = applySafePersonality(payload.summary);
+  let body = applyPersonality(payload.summary);
 
   if (unanchored.length > 0) {
     body += "\n\n### Additional findings\n";
     for (const finding of unanchored) {
       const prefix = finding.path ? `\`${finding.path}\`: ` : "";
-      body += `\n- **[${finding.severity.toUpperCase()}]** ${prefix}${applySafePersonality(finding.body)}`;
+      body += `\n- **[${finding.severity.toUpperCase()}]** ${prefix}${applyPersonality(finding.body)}`;
     }
   }
 
@@ -152,7 +143,7 @@ export function buildGithubReview(payload: ReviewPayload): {
     path: finding.path,
     line: finding.line!,
     side: "RIGHT" as const,
-    body: applySafePersonality(
+    body: applyPersonality(
       `**[${finding.severity.toUpperCase()}]** ${finding.body}`,
     ),
   }));

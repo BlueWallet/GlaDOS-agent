@@ -8,8 +8,10 @@ import {
   pullRequestRefFromNotification,
   subjectUrlToWebUrl,
 } from "../github/pr.js";
-import { processPrReview } from "../review/process.js";
-import { processPrThreadReplies } from "../review/thread-process.js";
+import {
+  processPrReviewWithThreadReplies,
+  processPrThreadReplies,
+} from "../thread-replies/index.js";
 
 const token = process.env.GLADOS_TOKEN;
 if (!token) {
@@ -36,7 +38,8 @@ try {
   for (const pr of reviewRequestedPrs) {
     console.log(`  ${pr.owner}/${pr.repo} #${pr.prNumber}`);
     console.log(`  ${pr.prUrl}`);
-    await processPrReview(pr, {
+    // Feature compose: Phase A + Phase B. Swap for processPrReview to rip out.
+    await processPrReviewWithThreadReplies(pr, {
       githubToken: token,
       cursorApiKey,
     });

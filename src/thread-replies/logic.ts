@@ -1,12 +1,12 @@
 import type { ReviewThread } from "../github/threads.js";
 import {
   applyPersonality,
-  stripGladosControlMarkers,
   type ReviewPayload,
-} from "./payload.js";
+} from "../review/payload.js";
 
 export const AGREE_MARKER = "<!-- glados:agree -->";
 const REPLY_TO_MARKER = /<!-- glados:reply-to:([^ ]+) -->/;
+const CONTROL_MARKER_RE = /<!--\s*glados:(?:agree|reply-to:[^>]*)\s*-->/gi;
 
 export interface SettledFinding {
   threadId: string;
@@ -20,6 +20,32 @@ export interface ThreadReplyDecision {
   threadId: string;
   decision: "agree" | "disagree";
   body: string;
+}
+
+/** Remove markers reserved for controlled review-thread state. */
+export function stripGladosControlMarkers(text: string): string {
+  return text.replace(CONTROL_MARKER_RE, "").trim();
+}
+
+/**
+ * Strip forged control markers from a review before posting.
+ * Call this from the thread-replies composer only — core review does not
+ * know about these markers.
+ */
+export function sanitizeReviewForPost(review: {
+  event: "APPROVE" | "REQUEST_CHANGES";
+  body: string;
+  comments: Array<{ path: string; line: number; side: "RIGHT"; body: string }>;
+  unanchored: ReviewPayload["findings"];
+}): typeof review {
+  return {
+    ...review,
+    body: stripGladosControlMarkers(review.body),
+    comments: review.comments.map((comment) => ({
+      ...comment,
+      body: stripGladosControlMarkers(comment.body),
+    })),
+  };
 }
 
 export function hasAgreeMarker(body: string): boolean {
@@ -102,7 +128,7 @@ export function listSettledFindings(
       path: thread.path,
       line: thread.line,
       originalBody: root.body,
-      agreementBody: stripControlMarkers(agreement.body),
+      agreementBody: stripGladosControlMarkers(agreement.body),
     });
   }
   return settled;
@@ -121,8 +147,8 @@ export function formatSettledContext(settled: SettledFinding[]): string {
     lines.push(
       [
         `- ${item.threadId} at \`${loc}\``,
-        `  - Original finding: ${stripControlMarkers(item.originalBody)}`,
-        `  - Why it was settled: ${stripControlMarkers(item.agreementBody)}`,
+        `  - Original finding: ${stripGladosControlMarkers(item.originalBody)}`,
+        `  - Why it was settled: ${stripGladosControlMarkers(item.agreementBody)}`,
       ].join("\n"),
     );
   }
@@ -141,7 +167,7 @@ export function buildThreadReplyPrompt(
     comments: thread.comments.map((comment) => ({
       author: comment.authorLogin,
       createdAt: comment.createdAt,
-      body: stripControlMarkers(comment.body),
+      body: stripGladosControlMarkers(comment.body),
     })),
   }));
   const encodedThreadData = encodeUntrustedPromptData(
@@ -296,18 +322,14 @@ export function formatReplyBody(
   body: string,
   replyToCommentId: string,
 ): string {
-  const text = stripControlMarkers(
-    applyPersonality(stripControlMarkers(body)),
+  const text = stripGladosControlMarkers(
+    applyPersonality(stripGladosControlMarkers(body)),
   );
   const replyMarker = `<!-- glados:reply-to:${encodeURIComponent(replyToCommentId)} -->`;
   if (decision === "agree") {
     return `${text}\n\n${replyMarker}\n${AGREE_MARKER}`;
   }
   return `${text}\n\n${replyMarker}`;
-}
-
-function stripControlMarkers(body: string): string {
-  return stripGladosControlMarkers(body);
 }
 
 function findAgreementComment(
@@ -349,7 +371,7 @@ function decodeReplyId(value: string): string | undefined {
 }
 
 function normalizeFindingBody(body: string): string {
-  return stripControlMarkers(body)
+  return stripGladosControlMarkers(body)
     .replace(/^\s*\*\*\[[A-Z]+\]\*\*\s*/i, "")
     .replace(/\s+/g, " ")
     .trim()

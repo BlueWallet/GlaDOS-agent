@@ -1,27 +1,20 @@
 import { Agent } from "@cursor/sdk";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { ReviewThread } from "../github/threads.js";
 import {
   buildReviewPrompt,
   parseReviewResult,
   type ReviewPayload,
 } from "./payload.js";
-import {
-  buildThreadReplyPrompt,
-  parseThreadReplyResult,
-  validateThreadReplyDecisions,
-  type ThreadReplyDecision,
-} from "./threads.js";
 
 export async function runAgentReview(
   repoDir: string,
   prUrl: string,
   cursorApiKey: string,
-  settledContext = "",
+  extraContext = "",
 ): Promise<ReviewPayload> {
-  const result = await promptAgent(
-    buildReviewPrompt(prUrl, settledContext),
+  const result = await promptLocalAgent(
+    buildReviewPrompt(prUrl, extraContext),
     repoDir,
     cursorApiKey,
   );
@@ -44,44 +37,11 @@ export async function runAgentReview(
   }
 }
 
-export async function runThreadReplies(
-  repoDir: string,
-  prUrl: string,
-  threads: ReviewThread[],
-  cursorApiKey: string,
-): Promise<ThreadReplyDecision[]> {
-  if (threads.length === 0) return [];
-
-  const result = await promptAgent(
-    buildThreadReplyPrompt(prUrl, threads),
-    repoDir,
-    cursorApiKey,
-  );
-
-  if (result.status !== "finished") {
-    throw new Error(`Thread reply agent ${result.status}: ${result.id}`);
-  }
-
-  const raw = result.result?.trim();
-  if (!raw) {
-    throw new Error("Agent returned empty thread replies");
-  }
-
-  try {
-    const decisions = parseThreadReplyResult(raw);
-    validateThreadReplyDecisions(
-      decisions,
-      threads.map((thread) => thread.id),
-    );
-    return decisions;
-  } catch (err) {
-    console.error("Could not parse thread reply JSON:");
-    console.log(raw);
-    throw err;
-  }
-}
-
-async function promptAgent(
+/**
+ * Shared local Cursor SDK prompt entry. Features outside this module may call
+ * this; they own their own prompts and result parsing.
+ */
+export async function promptLocalAgent(
   prompt: string,
   repoDir: string,
   cursorApiKey: string,
