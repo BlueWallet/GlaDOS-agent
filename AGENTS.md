@@ -135,7 +135,7 @@ When composed with thread replies, settled findings (original body + agreement r
 | Agent `cwd` = temp parent of checkout | Repo `.cursor/sandbox.json` is review data, not active policy |
 | Disposable `HOME` / XDG / `TMP*` under the temp workspace | No host `~/.ssh` or ambient `~/.cursor` |
 | Environment allowlist | No ambient tokens/DSNs for agent child processes |
-| `sandboxOptions: { enabled: true }` | Constrain tool execution |
+| `sandboxOptions: { enabled: false }` | Actions runners fail sandbox preflight; keep off |
 | `settingSources: []` | No ambient Cursor settings layers |
 | Git auth: `http.https://github.com/.extraHeader` + `GIT_LFS_SKIP_SMUDGE=1` | Scope PAT to GitHub; avoid LFS smudge/token leak |
 | Auth not persisted in `.git/config` | Agent must not read the PAT from the clone |

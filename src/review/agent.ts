@@ -70,7 +70,8 @@ export async function promptLocalAgent(
         local: {
           cwd: workspaceDir,
           settingSources: [],
-          sandboxOptions: { enabled: true },
+          // Off: GitHub Actions (and many Linux hosts) fail sandbox preflight.
+          sandboxOptions: { enabled: false },
         },
       }),
     {
