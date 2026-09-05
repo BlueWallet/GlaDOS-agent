@@ -49,7 +49,7 @@ src/
   review/               # core PR review feature — no thread-reply knowledge
     process.ts          # processPrReview() — orchestration only
     agent.ts            # runAgentReview() / promptLocalAgent() — Cursor SDK + sandbox/env
-    payload.ts          # review prompt, parse, GitHub formatting, personality
+    payload.ts          # draft + verify prompts, parse, merge, GitHub formatting
 
   thread-replies/       # optional feature — delete this folder to rip out
     index.ts            # public API only (import from here outside the folder)
@@ -119,13 +119,18 @@ cli/notifications.ts
 
 ## Full review (`src/review/`)
 
-When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into `buildReviewPrompt()`. After parse, `suppressSettledFindings()` removes exact text repeats. Open/disagreed threads do **not** suppress new findings.
+Two agent passes, then optional settled-finding suppression:
+
+1. **Draft** (`buildReviewPrompt`, `composer-2.5` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify.
+2. **Verify** (`buildVerifyPrompt`, `grok-4.6` / `GLADOS_VERIFY_MODEL`) — re-read callees, drop false positives, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review.
+
+When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
 
 **Approve vs request changes:** `critical` or `high` → `REQUEST_CHANGES`; else `APPROVE`.
 
 **Inline comments:** `path` + `line` → RIGHT-side review comments. Anchors outside the PR diff are demoted into the body (`getCommentableLines` / `appendCommentsToBody`); one bad anchor would 422 the whole batch.
 
-**Agent must not run tests/builds/installers** — review by reading files only (CI runs tests). Same rule for Phase A.
+**Agent must not run tests, builds, package managers, installers, or repository scripts** — review by reading files only (CI runs tests). Same rule for Phase A.
 
 ## Agent isolation (local Cursor SDK)
 
@@ -146,16 +151,16 @@ When composed with thread replies, settled findings (original body + agreement r
 
 | What | Where |
 |------|--------|
-| Reviewer instructions / JSON schema | `review/payload.ts` → `buildReviewPrompt()` |
+| Reviewer instructions / JSON schema | `review/payload.ts` → `buildReviewPrompt()` / `buildVerifyPrompt()` |
 | Severity levels | `review/payload.ts` → `SEVERITIES` + `Severity` |
-| GLaDOS voice | `review/payload.ts` → `applyPersonality()` (post-time rewrite) |
+| GLaDOS voice | `review/payload.ts` → `buildVerifyPrompt()`; `applyPersonality()` still wraps at post time |
 | Thread reply prompt / classification / suppress | `thread-replies/logic.ts` |
 | Phase A + compose with review | `thread-replies/process.ts` |
 | Core review wiring | `review/process.ts` (no business logic) |
 | Clone / lock / cleanup | `git/workspace.ts` |
 | GitHub I/O | `github/` |
 
-Tune **review prompt**, **thread-reply prompt**, and **personality** independently.
+Tune **draft prompt**, **verify prompt**, **thread-reply prompt**, and **personality** independently.
 
 Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.md`.
 
@@ -175,5 +180,7 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 |----------|----------|
 | `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, reviews, thread reply/resolve) |
 | `CURSOR_API_KEY` | Cursor SDK local agent runs |
+| `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `composer-2.5`) |
+| `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `grok-4.6`) |
 
 `GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry.

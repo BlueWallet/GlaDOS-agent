@@ -74,11 +74,13 @@ export async function processPrReviewWithThreadReplies(
           });
 
           console.log(`  Reviewing ${pr.prUrl} ...`);
+          const settledContext = formatSettledContext(threadResult.settled);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
-            formatSettledContext(threadResult.settled),
+            settledContext,
+            (draft) => suppressSettledFindings(draft, threadResult.settled),
           );
           const filtered = suppressSettledFindings(
             payload,

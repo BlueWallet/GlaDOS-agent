@@ -3,21 +3,70 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   buildReviewPrompt,
+  buildVerifyPrompt,
+  mergeVerifiedFindings,
   parseReviewResult,
+  parseVerifiedReviewResult,
   type ReviewPayload,
 } from "./payload.js";
+
+export const REVIEW_DRAFT_MODEL = "composer-2.5";
+export const REVIEW_VERIFY_MODEL = "grok-4.6";
+
+export function reviewDraftModel(): string {
+  return process.env.GLADOS_REVIEW_MODEL || REVIEW_DRAFT_MODEL;
+}
+
+export function reviewVerifyModel(): string {
+  return process.env.GLADOS_VERIFY_MODEL || REVIEW_VERIFY_MODEL;
+}
 
 export async function runAgentReview(
   repoDir: string,
   prUrl: string,
   cursorApiKey: string,
   extraContext = "",
+  filterDraft: (draft: ReviewPayload) => ReviewPayload = (draft) => draft,
 ): Promise<ReviewPayload> {
-  const result = await promptLocalAgent(
+  const draftModel = reviewDraftModel();
+  console.log(`  Draft review (${draftModel})...`);
+  const drafted = await runReviewPass(
     buildReviewPrompt(prUrl, extraContext),
     repoDir,
     cursorApiKey,
+    draftModel,
+    parseReviewResult,
   );
+  const draft = filterDraft(drafted);
+  if (draft.findings.length === 0) {
+    return draft;
+  }
+
+  const verifyModel = reviewVerifyModel();
+  console.log(`  Verify review (${verifyModel}, ${draft.findings.length} candidate(s))...`);
+  const verified = await runReviewPass(
+    buildVerifyPrompt(prUrl, draft, extraContext),
+    repoDir,
+    cursorApiKey,
+    verifyModel,
+    parseVerifiedReviewResult,
+  );
+  const merged = mergeVerifiedFindings(draft, verified);
+  const dropped = draft.findings.length - merged.findings.length;
+  if (dropped > 0) {
+    console.log(`  Verify dropped ${dropped} candidate(s)`);
+  }
+  return merged;
+}
+
+async function runReviewPass<T>(
+  prompt: string,
+  repoDir: string,
+  cursorApiKey: string,
+  modelId: string,
+  parse: (text: string) => T,
+): Promise<T> {
+  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId);
 
   if (result.status !== "finished") {
     throw new Error(`Review ${result.status}: ${result.id}`);
@@ -29,7 +78,7 @@ export async function runAgentReview(
   }
 
   try {
-    return parseReviewResult(raw);
+    return parse(raw);
   } catch (err) {
     console.error("Could not parse review JSON:");
     console.log(raw);
@@ -45,6 +94,7 @@ export async function promptLocalAgent(
   prompt: string,
   repoDir: string,
   cursorApiKey: string,
+  modelId = REVIEW_DRAFT_MODEL,
 ) {
   // Use the temp parent as the Cursor workspace. Repository-controlled
   // .cursor/sandbox.json then remains review data, not active sandbox policy.
@@ -66,7 +116,7 @@ export async function promptLocalAgent(
     () =>
       Agent.prompt(scopedPrompt, {
         apiKey: cursorApiKey,
-        model: { id: "composer-2.5" },
+        model: { id: modelId },
         local: {
           cwd: workspaceDir,
           settingSources: [],
