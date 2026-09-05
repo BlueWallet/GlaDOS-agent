@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildReviewPrompt,
   buildVerifyPrompt,
+  buildVoicePrompt,
   mergeVerifiedFindings,
   parseReviewResult,
   parseVerifiedReviewResult,
@@ -64,6 +65,21 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /"candidate": 0/);
   assert.match(prompt, /settled notes/);
   assert.match(prompt, /GlaDOS/);
+  assert.match(prompt, /Portal/);
+  assert.match(prompt, /110% over-the-top/i);
+  assert.match(prompt, /Avoid bland phrases/i);
+});
+
+test("voice prompt rewrites a clean draft without reopening the review", () => {
+  const prompt = buildVoicePrompt("https://example.test/pr/1", {
+    summary: "No defects found.",
+    findings: [],
+  });
+
+  assert.match(prompt, /empty findings array/i);
+  assert.match(prompt, /Do NOT add findings/i);
+  assert.match(prompt, /No defects found/);
+  assert.match(prompt, /110% over-the-top/i);
   assert.match(prompt, /Portal/);
 });
 

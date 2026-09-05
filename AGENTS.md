@@ -121,7 +121,7 @@ cli/notifications.ts
 
 Two agent passes, then optional settled-finding suppression:
 
-1. **Draft** (`buildReviewPrompt`, `composer-2.5` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify.
+1. **Draft** (`buildReviewPrompt`, `composer-2.5` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify and run a cheap GLaDOS voice rewrite of the summary (`buildVoicePrompt`).
 2. **Verify** (`buildVerifyPrompt`, `grok-4.6` / `GLADOS_VERIFY_MODEL`) — re-read callees, drop false positives, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review.
 
 When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
@@ -151,7 +151,7 @@ When composed with thread replies, settled findings (original body + agreement r
 
 | What | Where |
 |------|--------|
-| Reviewer instructions / JSON schema | `review/payload.ts` → `buildReviewPrompt()` / `buildVerifyPrompt()` |
+| Reviewer instructions / JSON schema | `review/payload.ts` → `buildReviewPrompt()` / `buildVerifyPrompt()` / `buildVoicePrompt()` |
 | Severity levels | `review/payload.ts` → `SEVERITIES` + `Severity` |
 | GLaDOS voice | `review/payload.ts` → `buildVerifyPrompt()`; `applyPersonality()` still wraps at post time |
 | Thread reply prompt / classification / suppress | `thread-replies/logic.ts` |
@@ -160,7 +160,7 @@ When composed with thread replies, settled findings (original body + agreement r
 | Clone / lock / cleanup | `git/workspace.ts` |
 | GitHub I/O | `github/` |
 
-Tune **draft prompt**, **verify prompt**, **thread-reply prompt**, and **personality** independently.
+Tune **draft prompt**, **verify prompt**, **voice prompt**, **thread-reply prompt**, and **personality** independently.
 
 Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.md`.
 

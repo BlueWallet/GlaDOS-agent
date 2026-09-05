@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import {
   buildReviewPrompt,
   buildVerifyPrompt,
+  buildVoicePrompt,
   mergeVerifiedFindings,
   parseReviewResult,
   parseVerifiedReviewResult,
@@ -39,7 +40,15 @@ export async function runAgentReview(
   );
   const draft = filterDraft(drafted);
   if (draft.findings.length === 0) {
-    return draft;
+    console.log(`  Voice review (${draftModel})...`);
+    const voiced = await runReviewPass(
+      buildVoicePrompt(prUrl, draft),
+      repoDir,
+      cursorApiKey,
+      draftModel,
+      parseReviewResult,
+    );
+    return { summary: voiced.summary, findings: [] };
   }
 
   const verifyModel = reviewVerifyModel();
