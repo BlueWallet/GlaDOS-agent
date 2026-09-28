@@ -11,8 +11,8 @@ import {
   type ReviewPayload,
 } from "./payload.js";
 
-export const REVIEW_DRAFT_MODEL = "composer-2.5";
-export const REVIEW_VERIFY_MODEL = "grok-4.6";
+export const REVIEW_DRAFT_MODEL = "grok-4.7";
+export const REVIEW_VERIFY_MODEL = "grok-4.7";
 
 export function reviewDraftModel(): string {
   return process.env.GLADOS_REVIEW_MODEL || REVIEW_DRAFT_MODEL;
@@ -20,6 +20,15 @@ export function reviewDraftModel(): string {
 
 export function reviewVerifyModel(): string {
   return process.env.GLADOS_VERIFY_MODEL || REVIEW_VERIFY_MODEL;
+}
+
+/** Grok 4.7 standard tier at xhigh. Other models get no params. */
+export function reviewModelParams(modelId: string): Array<{ id: string; value: string }> | undefined {
+  if (modelId !== "grok-4.7") return undefined;
+  return [
+    { id: "effort", value: "xhigh" },
+    { id: "fast", value: "false" },
+  ];
 }
 
 export async function runAgentReview(
@@ -30,7 +39,9 @@ export async function runAgentReview(
   filterDraft: (draft: ReviewPayload) => ReviewPayload = (draft) => draft,
 ): Promise<ReviewPayload> {
   const draftModel = reviewDraftModel();
-  console.log(`  Draft review (${draftModel})...`);
+  const draftParams = reviewModelParams(draftModel);
+  const draftLabel = formatModelLabel(draftModel, draftParams);
+  console.log(`  Draft review (${draftLabel})...`);
   const drafted = await runReviewPass(
     buildReviewPrompt(prUrl, extraContext),
     repoDir,
@@ -40,7 +51,7 @@ export async function runAgentReview(
   );
   const draft = filterDraft(drafted);
   if (draft.findings.length === 0) {
-    console.log(`  Voice review (${draftModel})...`);
+    console.log(`  Voice review (${draftLabel})...`);
     const voiced = await runReviewPass(
       buildVoicePrompt(prUrl, draft),
       repoDir,
@@ -52,7 +63,9 @@ export async function runAgentReview(
   }
 
   const verifyModel = reviewVerifyModel();
-  console.log(`  Verify review (${verifyModel}, ${draft.findings.length} candidate(s))...`);
+  const verifyParams = reviewModelParams(verifyModel);
+  const verifyLabel = formatModelLabel(verifyModel, verifyParams);
+  console.log(`  Verify review (${verifyLabel}, ${draft.findings.length} candidate(s))...`);
   const verified = await runReviewPass(
     buildVerifyPrompt(prUrl, draft, extraContext),
     repoDir,
@@ -66,6 +79,15 @@ export async function runAgentReview(
     console.log(`  Verify dropped ${dropped} candidate(s)`);
   }
   return merged;
+}
+
+function formatModelLabel(
+  modelId: string,
+  params: Array<{ id: string; value: string }> | undefined,
+): string {
+  if (!params?.length) return modelId;
+  const detail = params.map((param) => `${param.id}=${param.value}`).join(" ");
+  return `${modelId} ${detail}`;
 }
 
 async function runReviewPass<T>(
@@ -121,11 +143,12 @@ export async function promptLocalAgent(
     prompt,
   ].join("\n");
 
+  const modelParams = reviewModelParams(modelId);
   return withSanitizedAgentEnvironment(
     () =>
       Agent.prompt(scopedPrompt, {
         apiKey: cursorApiKey,
-        model: { id: modelId },
+        model: modelParams ? { id: modelId, params: modelParams } : { id: modelId },
         local: {
           cwd: workspaceDir,
           settingSources: [],

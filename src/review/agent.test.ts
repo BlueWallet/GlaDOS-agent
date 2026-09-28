@@ -4,6 +4,7 @@ import {
   REVIEW_DRAFT_MODEL,
   REVIEW_VERIFY_MODEL,
   reviewDraftModel,
+  reviewModelParams,
   reviewVerifyModel,
   withSanitizedAgentEnvironment,
 } from "./agent.js";
@@ -44,11 +45,16 @@ test("review models default and honor env overrides", () => {
     delete process.env.GLADOS_REVIEW_MODEL;
     delete process.env.GLADOS_VERIFY_MODEL;
     assert.equal(reviewDraftModel(), REVIEW_DRAFT_MODEL);
+    assert.deepEqual(reviewModelParams(REVIEW_DRAFT_MODEL), [
+      { id: "effort", value: "xhigh" },
+      { id: "fast", value: "false" },
+    ]);
     assert.equal(reviewVerifyModel(), REVIEW_VERIFY_MODEL);
 
     process.env.GLADOS_REVIEW_MODEL = "composer-2.5-fast";
     process.env.GLADOS_VERIFY_MODEL = "claude-opus-5";
     assert.equal(reviewDraftModel(), "composer-2.5-fast");
+    assert.equal(reviewModelParams("composer-2.5-fast"), undefined);
     assert.equal(reviewVerifyModel(), "claude-opus-5");
   } finally {
     restoreEnv("GLADOS_REVIEW_MODEL", oldReview);

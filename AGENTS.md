@@ -121,8 +121,8 @@ cli/notifications.ts
 
 Two agent passes, then optional settled-finding suppression:
 
-1. **Draft** (`buildReviewPrompt`, `composer-2.5` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify and run a cheap GLaDOS voice rewrite of the summary (`buildVoicePrompt`).
-2. **Verify** (`buildVerifyPrompt`, `grok-4.6` / `GLADOS_VERIFY_MODEL`) — re-read callees, drop false positives, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review.
+1. **Draft** (`buildReviewPrompt`, `grok-4.7` effort `xhigh`, `fast=false` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
+2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop false positives, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass.
 
 When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
 
@@ -180,7 +180,7 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 |----------|----------|
 | `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, reviews, thread reply/resolve) |
 | `CURSOR_API_KEY` | Cursor SDK local agent runs |
-| `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `composer-2.5`) |
-| `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `grok-4.6`) |
+| `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `grok-4.7`, effort `xhigh`, `fast=false`) |
+| `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `grok-4.7`, effort `xhigh`, `fast=false`) |
 
 `GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry.
