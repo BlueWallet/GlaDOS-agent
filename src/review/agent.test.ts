@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   REVIEW_DRAFT_MODEL,
   REVIEW_VERIFY_MODEL,
+  agentRunFailureMessage,
   reviewDraftModel,
   reviewModelParams,
   reviewVerifyModel,
@@ -46,7 +47,7 @@ test("review models default and honor env overrides", () => {
     delete process.env.GLADOS_VERIFY_MODEL;
     assert.equal(reviewDraftModel(), REVIEW_DRAFT_MODEL);
     assert.deepEqual(reviewModelParams(REVIEW_DRAFT_MODEL), [
-      { id: "effort", value: "xhigh" },
+      { id: "reasoning_effort", value: "xhigh" },
       { id: "fast", value: "false" },
     ]);
     assert.equal(reviewVerifyModel(), REVIEW_VERIFY_MODEL);
@@ -60,6 +61,21 @@ test("review models default and honor env overrides", () => {
     restoreEnv("GLADOS_REVIEW_MODEL", oldReview);
     restoreEnv("GLADOS_VERIFY_MODEL", oldVerify);
   }
+});
+
+test("failed agent runs include the SDK error message", () => {
+  assert.equal(
+    agentRunFailureMessage("Review", {
+      status: "error",
+      id: "run-1",
+      error: { message: "Invalid parameters for registry model" },
+    }),
+    "Review error: run-1: Invalid parameters for registry model",
+  );
+  assert.equal(
+    agentRunFailureMessage("Review", { status: "cancelled", id: "run-2" }),
+    "Review cancelled: run-2",
+  );
 });
 
 function restoreEnv(name: string, value: string | undefined): void {

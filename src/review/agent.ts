@@ -26,7 +26,7 @@ export function reviewVerifyModel(): string {
 export function reviewModelParams(modelId: string): Array<{ id: string; value: string }> | undefined {
   if (modelId !== "grok-4.7") return undefined;
   return [
-    { id: "effort", value: "xhigh" },
+    { id: "reasoning_effort", value: "xhigh" },
     { id: "fast", value: "false" },
   ];
 }
@@ -90,6 +90,15 @@ function formatModelLabel(
   return `${modelId} ${detail}`;
 }
 
+export function agentRunFailureMessage(
+  label: string,
+  result: { status: string; id: string; error?: { message: string } },
+): string {
+  const detail = result.error?.message.trim();
+  const base = `${label} ${result.status}: ${result.id}`;
+  return detail ? `${base}: ${detail}` : base;
+}
+
 async function runReviewPass<T>(
   prompt: string,
   repoDir: string,
@@ -100,7 +109,7 @@ async function runReviewPass<T>(
   const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId);
 
   if (result.status !== "finished") {
-    throw new Error(`Review ${result.status}: ${result.id}`);
+    throw new Error(agentRunFailureMessage("Review", result));
   }
 
   const raw = result.result?.trim();
