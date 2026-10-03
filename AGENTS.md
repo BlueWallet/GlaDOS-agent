@@ -121,8 +121,10 @@ cli/notifications.ts
 
 Two agent passes, then optional settled-finding suppression:
 
-1. **Draft** (`buildReviewPrompt`, `grok-4.7` `reasoning_effort=xhigh`, `fast=false` / `GLADOS_REVIEW_MODEL`) — dry technical findings. Empty `findings` is success; skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
-2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop false positives, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass.
+1. **Draft** (`buildReviewPrompt`, `grok-4.7` `reasoning_effort=xhigh`, `fast=false` / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
+2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`). `GLADOS_VERIFY_MODEL` overrides the verify pass.
+
+**Severity:** `critical` = bugs, security, data loss, broken functionality. `high` = architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior. `medium`/`low` = style, optimization, docs polish.
 
 When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
 
