@@ -9,6 +9,7 @@ import {
   parseReviewResult,
   parseVerifiedReviewResult,
   type ReviewPayload,
+  undisprovenBlockers,
 } from "./payload.js";
 
 export const REVIEW_DRAFT_MODEL = "grok-4.7";
@@ -78,7 +79,22 @@ export async function runAgentReview(
   if (dropped > 0) {
     console.log(`  Verify dropped ${dropped} candidate(s)`);
   }
+  for (const drop of verified.dropped ?? []) {
+    const candidate = draft.findings[drop.candidate]!;
+    console.log(
+      `    #${drop.candidate} [${candidate.severity}] ${logSafe(candidate.path)}: ${logSafe(drop.evidence)}`,
+    );
+  }
+  const restored = undisprovenBlockers(draft, verified).length;
+  if (restored > 0) {
+    console.log(`  Restored ${restored} blocker(s) dropped without evidence`);
+  }
   return merged;
+}
+
+/** Model-generated text on one line: control chars escaped, format chars removed. */
+function logSafe(text: string): string {
+  return JSON.stringify(text.replace(/\p{Cf}/gu, ""));
 }
 
 function formatModelLabel(

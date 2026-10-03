@@ -27,11 +27,18 @@ export interface VerifiedReviewFinding {
   candidate: number;
   severity: Severity;
   body: string;
+  evidence?: string;
+}
+
+export interface DroppedCandidate {
+  candidate: number;
+  evidence: string;
 }
 
 export interface VerifiedReviewPayload {
   summary: string;
   findings: VerifiedReviewFinding[];
+  dropped?: DroppedCandidate[];
 }
 
 /** Override this to add GLaDOS voice, formatting, etc. before posting. */
@@ -40,7 +47,7 @@ export function applyPersonality(text: string): string {
 }
 
 const REVIEW_JSON_SCHEMA = `{ "summary": "overall very concise review in markdown", "findings": [{ "severity": "${SEVERITIES.join("|")}", "path": "relative/path.ts", "line": 42, "body": "critique of this exact line" }] }`;
-const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate" }] }`;
+const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate", "evidence": "only when lowering a critical or high candidate below high: file and code that justifies it" }], "dropped": [{ "candidate": 1, "evidence": "file and code that disproves this candidate" }] }`;
 const EMPTY_VERIFIED_SUMMARY =
   "No candidate defects survived verification. The test chamber remains disappointingly intact.";
 
@@ -59,7 +66,9 @@ const GLADOS_VIBE = [
 
 /**
  * Phase 1: dry technical review. No roleplay — that happens after verification.
- * `extraContext` is an optional appendix from other features (no semantics here).
+ * Checklist and severity calibration are ported from the superpowers
+ * code-reviewer prompt. `extraContext` is an optional appendix from other
+ * features (no semantics here).
  */
 export function buildReviewPrompt(
   prUrl: string,
@@ -67,21 +76,49 @@ export function buildReviewPrompt(
 ): string {
   return [
     `Review pull request ${prUrl}.`,
+    "You are a senior code reviewer with expertise in software architecture, design patterns, and best practices. Your job is to find every issue in this change before it is merged.",
     "You are on the PR branch with full repo access.",
-    "Explore the repo and the diff as needed.",
+    "Explore the repo and the diff as needed. Read the changed code and the code it touches; do not review from the diff alone.",
     "Do NOT run tests, builds, package managers, installers, repository scripts, or executable project commands. This PR's CI pipeline runs tests; review by reading files only.",
-    "Determine the change's intention from the PR title, description, and diff. Check that the implementation matches that intention.",
+    "",
+    "Requirements:",
+    "The PR title, description, and any linked issues you can read are the requirements. Determine the change's intention from them and from the diff.",
+    "They say what the software must do; they do not enumerate every input, environment, or condition it will meet. For behavior they are silent on, judge by what a reasonable person using this software would expect. That expectation is a requirement, and silence is not permission.",
+    "",
+    "Check every category below. Do not stop at the first finding.",
+    "Plan alignment:",
+    "- Does the implementation match the stated intention? Is everything it promises present?",
+    "- Are deviations justified improvements or problematic departures?",
+    "Code quality:",
+    "- Proper error handling? What actually throws, returns, or is swallowed?",
+    "- Type safety? Edge cases handled (empty, null, zero, duplicates, concurrency, failure midway)?",
+    "- Clean separation of concerns? DRY without premature abstraction?",
+    "Architecture:",
+    "- Sound design decisions? Security concerns? Reasonable performance?",
+    "- Integrates cleanly with surrounding code and its existing callers?",
+    "Testing:",
+    "- Is changed behavior covered by tests? Are edge cases covered?",
+    "- Do tests exercise real behavior rather than assert against mocks?",
+    "Production readiness:",
+    "- Migration strategy if stored data or schema changed? Backward compatibility?",
+    "- Obvious bugs?",
+    "",
+    "Severity:",
+    "- critical: bugs, security issues, data loss risks, broken functionality.",
+    "- high: architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior.",
+    "- medium or low: code style, optimization opportunities, documentation polish.",
     "",
     "Rules:",
-    "- An empty findings array is the correct result when you cannot show a real defect this change introduces.",
-    "- Do not treat the PR's stated design or intention as a bug.",
+    "- Report every critical and high issue you find. Never omit or downgrade one to keep the review short or polite.",
+    "- Categorize by actual severity. Do not mark nitpicks as critical or high.",
+    "- Return an empty findings array only after you have checked every category above and found nothing.",
+    "- If the diff is too large for one pass, review it in several passes yourself.",
+    "- Do not give feedback on code you did not read.",
     "- Before reporting a control-flow or error-handling issue, read the called functions and their callers. Report what actually throws, returns, or is swallowed.",
-    "- Do not report pre-existing behavior unless this diff makes it worse.",
-    "- Residual risk, missing niceties, or speculative user-confusion notes are not findings. Omit them.",
-    "- Use high or critical only when this diff introduces a traced break, data loss, or security issue.",
-    "- Flag overengineering only when this diff adds substantial unused abstraction.",
-    "- If tests exist, flag them only when they do not exercise real behavior (for example they only assert against mocks).",
+    "- A deliberate choice in the PR's stated design or intention is not a bug by itself. A flaw in that design is a finding; say so.",
+    "- Do not report pre-existing behavior unless this diff makes it worse or depends on it.",
     "- If CONTRIBUTING.md exists, check that changes and commits follow it.",
+    "- Be specific. Each finding body states what is wrong, why it matters, and how to fix it if not obvious.",
     "- Include path and line on this branch whenever you can anchor a comment.",
     "",
     "Write dry technical text. No roleplay.",
@@ -94,7 +131,8 @@ export function buildReviewPrompt(
 }
 
 /**
- * Phase 2: drop false positives from a draft, then write kept text in character.
+ * Phase 2: drop disproven candidates from a draft, then write kept text in
+ * character. Blockers need cited disproof to be dropped.
  */
 export function buildVerifyPrompt(
   prUrl: string,
@@ -114,11 +152,20 @@ export function buildVerifyPrompt(
     "You are on the PR branch with full repo access. Re-read the relevant code.",
     "Do NOT run tests, builds, package managers, installers, repository scripts, or executable project commands. Review by reading files only.",
     "",
-    "Each candidate may be wrong. Drop a candidate when:",
-    "- it restates the PR's stated design or intention as if it were a defect",
-    "- it describes pre-existing behavior this diff did not worsen",
+    "Each candidate may be wrong. Drop a candidate only when:",
+    "- it restates a deliberate choice in the PR's stated design or intention as if it were a defect, without showing a flaw in that design",
+    "- it describes pre-existing behavior this diff did not worsen or depend on",
     "- the claimed throw, return, or error path is false after reading the called functions",
-    "- it is speculative residual risk or a missing nicety, not a traced break",
+    "- it is medium or low and is only speculation or a matter of taste",
+    ...(extraContext
+      ? ["- the additional context below rules it out; cite that context as evidence"]
+      : []),
+    "",
+    "Critical and high candidates are blockers. Architecture problems, poor error handling, unhandled edge cases, and test gaps for changed behavior are valid high findings; do not drop them for not being a traced crash.",
+    "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
+    "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
+    "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
+    "A candidate is either kept in \"findings\" or listed in \"dropped\", never both.",
     "",
     "You may lower severity. Do not raise severity. Do not add findings that were not in the candidate list.",
     "Return the candidate number for every kept finding. Do not return paths or lines; they are restored from the draft.",
@@ -130,7 +177,7 @@ export function buildVerifyPrompt(
     "END_UNTRUSTED_CANDIDATES",
     "",
     ...(extraContext ? [extraContext, ""] : []),
-    "After dropping false positives, rewrite the summary and each kept finding body in character. Do not add findings.",
+    "After dropping disproven candidates, rewrite the summary and each kept finding body in character. Keep what is wrong, why it matters, and the fix. Do not add findings.",
     "",
     ...GLADOS_VIBE,
     "",
@@ -173,17 +220,43 @@ function capSeverity(draft: Severity, verified: Severity): Severity {
   return SEVERITY_RANK[verified] > SEVERITY_RANK[draft] ? draft : verified;
 }
 
+/** Evidence must carry visible text; blank or control/format-only strings do not count. */
+function hasEvidence(evidence: string | undefined): boolean {
+  return /[\p{L}\p{N}]/u.test(evidence ?? "");
+}
+
+/**
+ * Draft blockers the verify pass neither kept nor dropped with evidence.
+ * These are restored by `mergeVerifiedFindings()`.
+ */
+export function undisprovenBlockers(
+  draft: ReviewPayload,
+  verified: VerifiedReviewPayload,
+): number[] {
+  const accounted = new Set<number>([
+    ...verified.findings.map((finding) => finding.candidate),
+    ...(verified.dropped ?? [])
+      .filter((drop) => hasEvidence(drop.evidence))
+      .map((drop) => drop.candidate),
+  ]);
+  return draft.findings.flatMap((finding, candidate) =>
+    isBlocker(finding.severity) && !accounted.has(candidate) ? [candidate] : [],
+  );
+}
+
 /**
  * Restore verified findings from their exact draft candidates.
  * Verify may rewrite body and lower severity; it may not invent candidates
- * or raise severity.
+ * or raise severity. Critical/high candidates dropped without evidence come
+ * back with their draft severity and body; lowered below high without
+ * evidence, they keep their draft severity.
  */
 export function mergeVerifiedFindings(
   draft: ReviewPayload,
   verified: VerifiedReviewPayload,
 ): ReviewPayload {
   const seen = new Set<number>();
-  const findings = verified.findings.map((finding) => {
+  const kept = verified.findings.map((finding) => {
     if (seen.has(finding.candidate)) {
       throw new Error(`Duplicate candidate id: ${finding.candidate}`);
     }
@@ -194,14 +267,48 @@ export function mergeVerifiedFindings(
       throw new Error(`Unknown candidate id: ${finding.candidate}`);
     }
 
+    const severity = capSeverity(candidate.severity, finding.severity);
+    const unblocked = isBlocker(candidate.severity) && !isBlocker(severity);
     return {
       ...candidate,
-      severity: capSeverity(candidate.severity, finding.severity),
+      severity:
+        unblocked && !hasEvidence(finding.evidence) ? candidate.severity : severity,
       body: finding.body,
     };
   });
 
-  return { summary: findings.length > 0 ? verified.summary : EMPTY_VERIFIED_SUMMARY, findings };
+  const dropped = new Set<number>();
+  for (const drop of verified.dropped ?? []) {
+    if (!draft.findings[drop.candidate]) {
+      throw new Error(`Unknown candidate id: ${drop.candidate}`);
+    }
+    if (dropped.has(drop.candidate)) {
+      throw new Error(`Duplicate candidate id: ${drop.candidate}`);
+    }
+    if (seen.has(drop.candidate)) {
+      throw new Error(`Candidate both kept and dropped: ${drop.candidate}`);
+    }
+    dropped.add(drop.candidate);
+  }
+
+  const restored = undisprovenBlockers(draft, verified).map(
+    (candidate) => draft.findings[candidate]!,
+  );
+  const findings = [...kept, ...restored];
+
+  if (findings.length === 0) {
+    return { summary: EMPTY_VERIFIED_SUMMARY, findings };
+  }
+  if (restored.length === 0) {
+    return { summary: verified.summary, findings };
+  }
+  const one = restored.length === 1;
+  const note = `${restored.length} blocking finding${one ? "" : "s"} could not be disproven and stay${one ? "s" : ""} on your permanent record, in the original clinical wording.`;
+  // With nothing kept, the verify summary claims no survivors; replace it.
+  return {
+    summary: kept.length > 0 ? `${verified.summary}\n\n${note}` : note,
+    findings,
+  };
 }
 
 export function parseReviewResult(text: string): ReviewPayload {
@@ -233,9 +340,22 @@ export function parseReviewResult(text: string): ReviewPayload {
 }
 
 export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
-  const { summary, findings } = parsePayloadEnvelope(text);
+  const { summary, findings, dropped } = parsePayloadEnvelope(text);
   return {
     summary,
+    dropped: dropped.map((item, index) => {
+      const drop = item as Record<string, unknown> | null;
+      if (
+        !drop ||
+        typeof drop !== "object" ||
+        !Number.isInteger(drop.candidate) ||
+        (drop.candidate as number) < 0 ||
+        typeof drop.evidence !== "string"
+      ) {
+        throw new Error(`Invalid dropped candidate at index ${index}`);
+      }
+      return { candidate: drop.candidate as number, evidence: drop.evidence };
+    }),
     findings: findings.map((item, index) => {
       if (!item || typeof item !== "object") {
         throw new Error(`Invalid verified finding at index ${index}`);
@@ -246,7 +366,8 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         (finding.candidate as number) < 0 ||
         typeof finding.severity !== "string" ||
         !isSeverity(finding.severity) ||
-        typeof finding.body !== "string"
+        typeof finding.body !== "string" ||
+        (finding.evidence !== undefined && typeof finding.evidence !== "string")
       ) {
         throw new Error(`Invalid verified finding at index ${index}`);
       }
@@ -254,6 +375,7 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         candidate: finding.candidate as number,
         severity: finding.severity,
         body: finding.body,
+        ...(finding.evidence ? { evidence: finding.evidence } : {}),
       };
     }),
   };
@@ -262,10 +384,12 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
 function parsePayloadEnvelope(text: string): {
   summary: string;
   findings: unknown[];
+  dropped: unknown[];
 } {
   const parsed = JSON.parse(extractJson(text)) as {
     summary?: unknown;
     findings?: unknown;
+    dropped?: unknown;
   };
   if (typeof parsed.summary !== "string") {
     throw new Error("Review JSON missing string summary");
@@ -273,7 +397,11 @@ function parsePayloadEnvelope(text: string): {
   if (!Array.isArray(parsed.findings)) {
     throw new Error("Review JSON missing findings array");
   }
-  return { summary: parsed.summary, findings: parsed.findings };
+  return {
+    summary: parsed.summary,
+    findings: parsed.findings,
+    dropped: Array.isArray(parsed.dropped) ? parsed.dropped : [],
+  };
 }
 
 function extractJson(text: string): string {
