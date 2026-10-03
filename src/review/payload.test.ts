@@ -30,10 +30,24 @@ const draft: ReviewPayload = {
   ],
 };
 
-test("draft prompt is dry and does not push issue-hunting", () => {
+test("draft prompt is dry, strict, and covers the full review checklist", () => {
   const prompt = buildReviewPrompt("https://example.test/pr/1", "settled notes");
 
-  assert.match(prompt, /empty findings array/i);
+  for (const category of [
+    /Plan alignment/,
+    /Code quality/,
+    /Architecture/,
+    /Testing/,
+    /Production readiness/,
+  ]) {
+    assert.match(prompt, category);
+  }
+  assert.match(prompt, /Report every critical and high issue/i);
+  assert.match(prompt, /high: .*test gaps/i);
+  assert.match(prompt, /silence is not permission/i);
+  assert.doesNotMatch(prompt, /residual risk/i);
+  assert.doesNotMatch(prompt, /missing niceties/i);
+  assert.doesNotMatch(prompt, /is the correct result/i);
   assert.match(prompt, /package managers|install dependencies/i);
   assert.match(prompt, /stated (design|intention)/i);
   assert.match(prompt, /read the called functions/i);
@@ -58,6 +72,9 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /src\/storage\.ts/);
   assert.match(prompt, /save\(\) is assumed to throw/);
   assert.match(prompt, /Do not add findings/i);
+  assert.match(prompt, /only with concrete disproof/i);
+  assert.match(prompt, /If in doubt, keep/i);
+  assert.match(prompt, /"dropped": \[/);
   assert.match(prompt, /stated (design|intention)/i);
   assert.match(prompt, /called functions|callees/i);
   assert.match(prompt, /package managers|install dependencies/i);
@@ -122,14 +139,43 @@ test("mergeVerifiedFindings will not raise severity above the draft", () => {
   assert.equal(merged.findings[0]?.severity, "medium");
 });
 
-test("mergeVerifiedFindings may drop every candidate", () => {
+test("mergeVerifiedFindings may drop every candidate when blockers are disproven", () => {
   const merged = mergeVerifiedFindings(draft, {
     summary: "Invented critical defect.",
     findings: [],
+    dropped: [
+      { candidate: 0, evidence: "src/storage.ts save() returns false, never throws." },
+    ],
   });
   assert.equal(merged.findings.length, 0);
   assert.doesNotMatch(merged.summary, /invented critical defect/i);
   assert.match(merged.summary, /no candidate defects survived/i);
+});
+
+test("mergeVerifiedFindings restores blockers dropped without evidence", () => {
+  for (const dropped of [undefined, [], [{ candidate: 0, evidence: "  " }]]) {
+    const merged = mergeVerifiedFindings(draft, {
+      summary: "No candidate survived.",
+      findings: [],
+      dropped,
+    });
+    assert.deepEqual(merged.findings, [draft.findings[0]]);
+    assert.match(merged.summary, /1 blocking finding could not be disproven/);
+  }
+});
+
+test("mergeVerifiedFindings appends restored blockers after kept findings", () => {
+  const merged = mergeVerifiedFindings(draft, {
+    summary: "Cleanup is sloppy.",
+    findings: [{ candidate: 1, severity: "medium", body: "Fire-and-forget." }],
+  });
+  assert.deepEqual(
+    merged.findings.map((f: ReviewFinding) => [f.line, f.severity]),
+    [
+      [40, "medium"],
+      [20, "high"],
+    ],
+  );
 });
 
 test("mergeVerifiedFindings rejects unknown and duplicate candidate ids", () => {
@@ -188,6 +234,21 @@ test("parseVerifiedReviewResult accepts candidate ids and rejects malformed rows
   assert.deepEqual(parsed.findings, [
     { candidate: 1, severity: "low", body: "kept" },
   ]);
+  assert.deepEqual(parsed.dropped, []);
+
+  const withDropped = parseVerifiedReviewResult(
+    '{"summary":"verified","findings":[],"dropped":[{"candidate":0,"evidence":"a.ts returns early"}]}',
+  );
+  assert.deepEqual(withDropped.dropped, [
+    { candidate: 0, evidence: "a.ts returns early" },
+  ]);
+  assert.throws(
+    () =>
+      parseVerifiedReviewResult(
+        '{"summary":"bad","findings":[],"dropped":[{"candidate":0}]}',
+      ),
+    /invalid dropped candidate/i,
+  );
 
   assert.throws(
     () =>
