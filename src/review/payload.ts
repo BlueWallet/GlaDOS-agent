@@ -27,6 +27,7 @@ export interface VerifiedReviewFinding {
   candidate: number;
   severity: Severity;
   body: string;
+  evidence?: string;
 }
 
 export interface DroppedCandidate {
@@ -46,7 +47,7 @@ export function applyPersonality(text: string): string {
 }
 
 const REVIEW_JSON_SCHEMA = `{ "summary": "overall very concise review in markdown", "findings": [{ "severity": "${SEVERITIES.join("|")}", "path": "relative/path.ts", "line": 42, "body": "critique of this exact line" }] }`;
-const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate" }], "dropped": [{ "candidate": 1, "evidence": "file and code that disproves this candidate" }] }`;
+const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate", "evidence": "only when lowering a critical or high candidate below high: file and code that justifies it" }], "dropped": [{ "candidate": 1, "evidence": "file and code that disproves this candidate" }] }`;
 const EMPTY_VERIFIED_SUMMARY =
   "No candidate defects survived verification. The test chamber remains disappointingly intact.";
 
@@ -81,7 +82,7 @@ export function buildReviewPrompt(
     "Do NOT run tests, builds, package managers, installers, repository scripts, or executable project commands. This PR's CI pipeline runs tests; review by reading files only.",
     "",
     "Requirements:",
-    "The PR title, description, and linked issues are the requirements. Determine the change's intention from them and from the diff.",
+    "The PR title, description, and any linked issues you can read are the requirements. Determine the change's intention from them and from the diff.",
     "They say what the software must do; they do not enumerate every input, environment, or condition it will meet. For behavior they are silent on, judge by what a reasonable person using this software would expect. That expectation is a requirement, and silence is not permission.",
     "",
     "Check every category below. Do not stop at the first finding.",
@@ -156,10 +157,15 @@ export function buildVerifyPrompt(
     "- it describes pre-existing behavior this diff did not worsen or depend on",
     "- the claimed throw, return, or error path is false after reading the called functions",
     "- it is medium or low and is only speculation or a matter of taste",
+    ...(extraContext
+      ? ["- the additional context below rules it out; cite that context as evidence"]
+      : []),
     "",
     "Critical and high candidates are blockers. Architecture problems, poor error handling, unhandled edge cases, and test gaps for changed behavior are valid high findings; do not drop them for not being a traced crash.",
     "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
     "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
+    "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
+    "A candidate is either kept in \"findings\" or listed in \"dropped\", never both.",
     "",
     "You may lower severity. Do not raise severity. Do not add findings that were not in the candidate list.",
     "Return the candidate number for every kept finding. Do not return paths or lines; they are restored from the draft.",
@@ -214,6 +220,11 @@ function capSeverity(draft: Severity, verified: Severity): Severity {
   return SEVERITY_RANK[verified] > SEVERITY_RANK[draft] ? draft : verified;
 }
 
+/** Evidence must carry visible text; blank or control/format-only strings do not count. */
+function hasEvidence(evidence: string | undefined): boolean {
+  return /[\p{L}\p{N}]/u.test(evidence ?? "");
+}
+
 /**
  * Draft blockers the verify pass neither kept nor dropped with evidence.
  * These are restored by `mergeVerifiedFindings()`.
@@ -225,7 +236,7 @@ export function undisprovenBlockers(
   const accounted = new Set<number>([
     ...verified.findings.map((finding) => finding.candidate),
     ...(verified.dropped ?? [])
-      .filter((drop) => drop.evidence.trim())
+      .filter((drop) => hasEvidence(drop.evidence))
       .map((drop) => drop.candidate),
   ]);
   return draft.findings.flatMap((finding, candidate) =>
@@ -237,7 +248,8 @@ export function undisprovenBlockers(
  * Restore verified findings from their exact draft candidates.
  * Verify may rewrite body and lower severity; it may not invent candidates
  * or raise severity. Critical/high candidates dropped without evidence come
- * back with their draft severity and body.
+ * back with their draft severity and body; lowered below high without
+ * evidence, they keep their draft severity.
  */
 export function mergeVerifiedFindings(
   draft: ReviewPayload,
@@ -255,12 +267,30 @@ export function mergeVerifiedFindings(
       throw new Error(`Unknown candidate id: ${finding.candidate}`);
     }
 
+    const severity = capSeverity(candidate.severity, finding.severity);
+    const unblocked = isBlocker(candidate.severity) && !isBlocker(severity);
     return {
       ...candidate,
-      severity: capSeverity(candidate.severity, finding.severity),
+      severity:
+        unblocked && !hasEvidence(finding.evidence) ? candidate.severity : severity,
       body: finding.body,
     };
   });
+
+  const dropped = new Set<number>();
+  for (const drop of verified.dropped ?? []) {
+    if (!draft.findings[drop.candidate]) {
+      throw new Error(`Unknown candidate id: ${drop.candidate}`);
+    }
+    if (dropped.has(drop.candidate)) {
+      throw new Error(`Duplicate candidate id: ${drop.candidate}`);
+    }
+    if (seen.has(drop.candidate)) {
+      throw new Error(`Candidate both kept and dropped: ${drop.candidate}`);
+    }
+    dropped.add(drop.candidate);
+  }
+
   const restored = undisprovenBlockers(draft, verified).map(
     (candidate) => draft.findings[candidate]!,
   );
@@ -269,11 +299,16 @@ export function mergeVerifiedFindings(
   if (findings.length === 0) {
     return { summary: EMPTY_VERIFIED_SUMMARY, findings };
   }
-  const summary =
-    restored.length > 0
-      ? `${verified.summary}\n\n${restored.length} blocking finding${restored.length === 1 ? "" : "s"} could not be disproven and remain${restored.length === 1 ? "s" : ""} in the test record.`
-      : verified.summary;
-  return { summary, findings };
+  if (restored.length === 0) {
+    return { summary: verified.summary, findings };
+  }
+  const one = restored.length === 1;
+  const note = `${restored.length} blocking finding${one ? "" : "s"} could not be disproven and stay${one ? "s" : ""} on your permanent record, in the original clinical wording.`;
+  // With nothing kept, the verify summary claims no survivors; replace it.
+  return {
+    summary: kept.length > 0 ? `${verified.summary}\n\n${note}` : note,
+    findings,
+  };
 }
 
 export function parseReviewResult(text: string): ReviewPayload {
@@ -314,6 +349,7 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         !drop ||
         typeof drop !== "object" ||
         !Number.isInteger(drop.candidate) ||
+        (drop.candidate as number) < 0 ||
         typeof drop.evidence !== "string"
       ) {
         throw new Error(`Invalid dropped candidate at index ${index}`);
@@ -330,7 +366,8 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         (finding.candidate as number) < 0 ||
         typeof finding.severity !== "string" ||
         !isSeverity(finding.severity) ||
-        typeof finding.body !== "string"
+        typeof finding.body !== "string" ||
+        (finding.evidence !== undefined && typeof finding.evidence !== "string")
       ) {
         throw new Error(`Invalid verified finding at index ${index}`);
       }
@@ -338,6 +375,7 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         candidate: finding.candidate as number,
         severity: finding.severity,
         body: finding.body,
+        ...(finding.evidence ? { evidence: finding.evidence } : {}),
       };
     }),
   };

@@ -74,6 +74,11 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /Do not add findings/i);
   assert.match(prompt, /only with concrete disproof/i);
   assert.match(prompt, /If in doubt, keep/i);
+  assert.match(prompt, /additional context below rules it out/i);
+  assert.doesNotMatch(
+    buildVerifyPrompt("https://example.test/pr/1", draft),
+    /additional context below/i,
+  );
   assert.match(prompt, /"dropped": \[/);
   assert.match(prompt, /stated (design|intention)/i);
   assert.match(prompt, /called functions|callees/i);
@@ -108,6 +113,7 @@ test("mergeVerifiedFindings restores the exact candidate anchor and allows rewri
         candidate: 0,
         severity: "medium",
         body: "After reading save(), it swallows errors; this finding still holds for a different reason.",
+        evidence: "src/storage.ts save() catches and returns false; callers retry.",
       },
     ],
   };
@@ -123,6 +129,17 @@ test("mergeVerifiedFindings restores the exact candidate anchor and allows rewri
     [{ path: "src/storage.ts", line: 20, severity: "medium" }],
   );
   assert.match(merged.findings[0]!.body, /swallows errors/);
+});
+
+test("mergeVerifiedFindings keeps a blocker's severity when lowered without evidence", () => {
+  for (const evidence of [undefined, "", "\u200b\u202e \n"]) {
+    const merged = mergeVerifiedFindings(draft, {
+      summary: "Downgraded.",
+      findings: [{ candidate: 0, severity: "low", body: "Probably fine.", evidence }],
+    });
+    assert.equal(merged.findings[0]?.severity, "high");
+    assert.match(merged.findings[0]!.body, /Probably fine/);
+  }
 });
 
 test("mergeVerifiedFindings will not raise severity above the draft", () => {
@@ -161,6 +178,36 @@ test("mergeVerifiedFindings restores blockers dropped without evidence", () => {
     });
     assert.deepEqual(merged.findings, [draft.findings[0]]);
     assert.match(merged.summary, /1 blocking finding could not be disproven/);
+    assert.doesNotMatch(merged.summary, /No candidate survived/);
+  }
+});
+
+test("mergeVerifiedFindings rejects inconsistent dropped ids", () => {
+  const evidence = "src/storage.ts shows otherwise.";
+  const cases: Array<[VerifiedReviewPayload, RegExp]> = [
+    [{ summary: "", findings: [], dropped: [{ candidate: 9, evidence }] }, /unknown candidate/i],
+    [
+      {
+        summary: "",
+        findings: [],
+        dropped: [
+          { candidate: 0, evidence },
+          { candidate: 0, evidence },
+        ],
+      },
+      /duplicate candidate/i,
+    ],
+    [
+      {
+        summary: "",
+        findings: [{ candidate: 0, severity: "high", body: "Kept." }],
+        dropped: [{ candidate: 0, evidence }],
+      },
+      /both kept and dropped/i,
+    ],
+  ];
+  for (const [verified, error] of cases) {
+    assert.throws(() => mergeVerifiedFindings(draft, verified), error);
   }
 });
 
@@ -176,6 +223,7 @@ test("mergeVerifiedFindings appends restored blockers after kept findings", () =
       [20, "high"],
     ],
   );
+  assert.match(merged.summary, /^Cleanup is sloppy\.\n\n1 blocking finding/);
 });
 
 test("mergeVerifiedFindings rejects unknown and duplicate candidate ids", () => {
@@ -246,6 +294,13 @@ test("parseVerifiedReviewResult accepts candidate ids and rejects malformed rows
     () =>
       parseVerifiedReviewResult(
         '{"summary":"bad","findings":[],"dropped":[{"candidate":0}]}',
+      ),
+    /invalid dropped candidate/i,
+  );
+  assert.throws(
+    () =>
+      parseVerifiedReviewResult(
+        '{"summary":"bad","findings":[],"dropped":[{"candidate":-1,"evidence":"x"}]}',
       ),
     /invalid dropped candidate/i,
   );
