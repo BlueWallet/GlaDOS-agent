@@ -3,6 +3,8 @@ import test from "node:test";
 import type { IssueComment } from "../github/comments.js";
 import { AGREE_MARKER } from "./logic.js";
 import {
+  MENTION_BATCH,
+  MENTION_BODY_CAP,
   acknowledgedCommentIds,
   assertCurrentConversationSnapshot,
   buildMentionReplyPrompt,
@@ -145,7 +147,22 @@ test("mention prompt encodes mentions and carries the PR context block", () => {
   assert.match(prompt, /BEGIN_UNTRUSTED_MENTIONS/);
   assert.equal(prompt.includes(injection), false);
   assert.match(prompt, /\\u003c\/mentions\\u003e/);
-  assert.match(prompt, /"IC_1"/);
+  assert.match(prompt, /IC_1 .*alice/);
   assert.match(prompt, /Portal/);
   assert.match(prompt, /"body"/);
+});
+
+test("mention prompt caps each body after escaping", () => {
+  const prompt = buildMentionReplyPrompt(
+    "https://github.com/acme/widgets/pull/1",
+    "PR #1: Title",
+    [comment("IC_1", "alice", `@glados ${"<".repeat(10_000)}`, "2026-01-01T00:00:00Z")],
+  );
+
+  assert.ok(prompt.length < MENTION_BODY_CAP + 2_000, `prompt too long: ${prompt.length}`);
+  assert.match(prompt, /\[truncated, \d+ more chars\]/);
+});
+
+test("mention batches are bounded", () => {
+  assert.ok(MENTION_BATCH >= 1 && MENTION_BATCH <= 20);
 });

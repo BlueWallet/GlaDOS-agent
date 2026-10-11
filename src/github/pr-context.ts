@@ -65,7 +65,15 @@ interface CorePage {
       headRefOid: string;
       state: PullRequestState;
       author: { login: string } | null;
+    } | null;
+  } | null;
+}
+
+interface IssuesPage {
+  repository: {
+    pullRequest: {
       closingIssuesReferences: {
+        pageInfo: PageInfo;
         nodes: Array<{
           number: number;
           title: string;
@@ -99,8 +107,9 @@ export async function fetchPrContext(
   pr: PullRequestRef,
 ): Promise<PrContext> {
   const octokit = github.getOctokit(githubToken);
-  const [core, reviews, conversation, threads] = await Promise.all([
+  const [core, issues, reviews, conversation, threads] = await Promise.all([
     fetchCore(octokit, pr),
+    listLinkedIssues(octokit, pr),
     listReviews(octokit, pr),
     listPrIssueComments(githubToken, pr),
     listReviewThreads(githubToken, pr),
@@ -116,12 +125,7 @@ export async function fetchPrContext(
     headRefOid: core.pull.headRefOid,
     authorLogin: core.pull.author?.login ?? "ghost",
     state: core.pull.state,
-    issues: core.pull.closingIssuesReferences.nodes.map((issue) => ({
-      number: issue.number,
-      repository: issue.repository.nameWithOwner,
-      title: issue.title,
-      body: issue.body,
-    })),
+    issues,
     reviews,
     comments: conversation.comments,
     threads,
@@ -146,14 +150,6 @@ async function fetchCore(
           headRefOid
           state
           author { login }
-          closingIssuesReferences(first: 20) {
-            nodes {
-              number
-              title
-              body
-              repository { nameWithOwner }
-            }
-          }
         }
       }
     }`,
@@ -164,6 +160,54 @@ async function fetchCore(
     throw new Error(`PR not found: ${pr.owner}/${pr.repo}#${pr.prNumber}`);
   }
   return { viewer: data.viewer, pull };
+}
+
+/** Issues linked by closing keywords or the Development sidebar, fully paginated. */
+async function listLinkedIssues(
+  octokit: Octokit,
+  pr: Pick<PullRequestRef, "owner" | "repo" | "prNumber">,
+): Promise<LinkedIssue[]> {
+  const issues: LinkedIssue[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const data: IssuesPage = await octokit.graphql(
+      `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            closingIssuesReferences(first: 50, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                number
+                title
+                body
+                repository { nameWithOwner }
+              }
+            }
+          }
+        }
+      }`,
+      { owner: pr.owner, repo: pr.repo, number: pr.prNumber, cursor },
+    );
+
+    const connection = data.repository?.pullRequest?.closingIssuesReferences;
+    if (!connection) {
+      throw new Error(`PR not found: ${pr.owner}/${pr.repo}#${pr.prNumber}`);
+    }
+    for (const node of connection.nodes) {
+      issues.push({
+        number: node.number,
+        repository: node.repository.nameWithOwner,
+        title: node.title,
+        body: node.body,
+      });
+    }
+
+    if (!connection.pageInfo.hasNextPage) break;
+    cursor = connection.pageInfo.endCursor;
+  }
+
+  return issues;
 }
 
 /** Fully paginated reviews, oldest first. Includes the viewer's own PENDING review. */

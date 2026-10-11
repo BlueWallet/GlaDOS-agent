@@ -283,6 +283,10 @@ test("mentionsLogin matches whole handles outside code and quotes", () => {
   assert.equal(mentionsLogin("org/@glados", glados), false);
   assert.equal(mentionsLogin("`@glados`", glados), false);
   assert.equal(mentionsLogin("```\n@glados\n```", glados), false);
+  assert.equal(mentionsLogin("~~~\n@glados\n~~~", glados), false);
+  assert.equal(mentionsLogin("``@glados``", glados), false);
+  assert.equal(mentionsLogin("``a ` b @glados``", glados), false);
+  assert.equal(mentionsLogin("`x` @glados `y`", glados), true);
   assert.equal(mentionsLogin("> @glados said\nok", glados), false);
   assert.equal(mentionsLogin("> quoted\n@glados new", glados), true);
 });

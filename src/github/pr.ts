@@ -62,6 +62,29 @@ export async function listReviewRequestedPullRequests(
   return prs;
 }
 
+/** Current PR state; checked right before writes that only make sense on open PRs. */
+export async function getPullRequestState(
+  githubToken: string,
+  pr: Pick<PullRequestRef, "owner" | "repo" | "prNumber">,
+): Promise<"OPEN" | "CLOSED" | "MERGED"> {
+  const octokit = github.getOctokit(githubToken);
+  const data = await octokit.graphql<{
+    repository: { pullRequest: { state: "OPEN" | "CLOSED" | "MERGED" } | null } | null;
+  }>(
+    `query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) { state }
+      }
+    }`,
+    { owner: pr.owner, repo: pr.repo, number: pr.prNumber },
+  );
+  const pull = data.repository?.pullRequest;
+  if (!pull) {
+    throw new Error(`PR not found: ${pr.owner}/${pr.repo}#${pr.prNumber}`);
+  }
+  return pull.state;
+}
+
 /** Whether the authenticated user is on the PR's pending reviewer list. */
 export async function isReviewRequestedForUser(
   githubToken: string,

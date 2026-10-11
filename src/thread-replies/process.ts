@@ -14,7 +14,7 @@ import {
   resolveReviewThread,
   type ReviewThread,
 } from "../github/threads.js";
-import { isReviewRequestedForUser } from "../github/pr.js";
+import { getPullRequestState, isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import { runAgentReview } from "../review/agent.js";
 import { buildGithubReview } from "../review/payload.js";
@@ -37,6 +37,7 @@ import {
   type ThreadReplyDecision,
 } from "./logic.js";
 import {
+  MENTION_BATCH,
   formatMentionReplyBody,
   isCurrentConversationSnapshot,
   listAwaitingMentions,
@@ -244,6 +245,7 @@ async function processThreadState(
       if (!snapshot) {
         throw new Error(`Missing thread snapshot: ${decision.threadId}`);
       }
+      const kind = threadReplyKind(snapshot, login);
       const thread = await getReviewThread(
         options.githubToken,
         decision.threadId,
@@ -252,12 +254,18 @@ async function processThreadState(
         [snapshot],
         thread ? [thread] : [],
         login,
-        threadReplyKind(snapshot, login) === "own"
-          ? isAwaitingThread
-          : isAwaitingForeignThread,
+        kind === "own" ? isAwaitingThread : isAwaitingForeignThread,
       );
       if (!thread) {
         throw new Error(`Thread disappeared before reply: ${decision.threadId}`);
+      }
+      // Foreign replies only on open PRs; the PR may have closed meanwhile.
+      if (
+        kind === "foreign" &&
+        (await getPullRequestState(options.githubToken, pr)) !== "OPEN"
+      ) {
+        console.log(`  PR closed while evaluating; skipping ${thread.path}`);
+        continue;
       }
       const result = await applyThreadDecision(
         options.githubToken,
@@ -291,12 +299,16 @@ async function replyToMentions(
   login: string,
 ): Promise<boolean> {
   const snapshot = await listPrIssueComments(options.githubToken, pr);
-  const mentions =
+  const awaiting =
     snapshot.state === "OPEN"
       ? listAwaitingMentions(snapshot.comments, login)
       : [];
-  if (mentions.length === 0) return true;
-  console.log(`  ${mentions.length} mention(s) awaiting reply...`);
+  if (awaiting.length === 0) return true;
+  // Bounded batch keeps the prompt small; the rest stay awaiting.
+  const mentions = awaiting.slice(0, MENTION_BATCH);
+  console.log(
+    `  ${awaiting.length} mention(s) awaiting reply, answering ${mentions.length}...`,
+  );
 
   const prContext = await loadPrContextBlock(options.githubToken, pr);
   const body = await runMentionReply(
@@ -310,6 +322,10 @@ async function replyToMentions(
   // Re-fetch immediately before the write; any new or edited comment makes
   // the answer stale.
   const current = await listPrIssueComments(options.githubToken, pr);
+  if (current.state !== "OPEN") {
+    console.log("  PR closed while evaluating mentions; skipping");
+    return true;
+  }
   if (!isCurrentConversationSnapshot(snapshot.comments, current.comments)) {
     console.error("  Conversation changed while evaluating mentions; retrying later");
     return false;

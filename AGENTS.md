@@ -117,13 +117,13 @@ cli/notifications.ts
 
 **Awaiting mention** (`listAwaitingMentions`, `mentions.ts`): PR conversation comment by someone else, not minimized, mentions `@<login>`, and its id is not in any GLaDOS reply-to marker. Only explicit mentions count in the flat conversation.
 
-**Bots and closed PRs:** bot authors never trigger foreign-thread or conversation replies; in an engaged foreign thread a bot comment counts only if it mentions GLaDOS (no bot-to-bot loops). Foreign-thread and conversation replies are skipped when the PR is not `OPEN`; own threads are always answered.
+**Bots and closed PRs:** bot authors never trigger foreign-thread or conversation replies; in an engaged foreign thread a bot comment counts only if it mentions GLaDOS (no bot-to-bot loops). Foreign-thread and conversation replies are skipped when the PR is not `OPEN` (state re-checked right before the write); own threads are always answered.
 
 `mentionsLogin()` matches the whole handle (`[A-Za-z0-9-]` boundary, case-insensitive) outside fenced blocks, inline code, and quoted lines.
 
 **Agents:**
 - `runThreadReplies()` — thread history (with `kind`) + local checkout → JSON `{ replies: [{ threadId, decision: "agree"|"disagree"|"reply", body }] }`, exactly one per awaiting thread; `reply` is required for foreign threads and rejected for own ones.
-- `runMentionReply()` — PR context block + awaiting comments → JSON `{ body }`, one consolidated reply.
+- `runMentionReply()` — PR context block + up to `MENTION_BATCH` (10) oldest awaiting comments (bodies capped at 4k after escaping) → JSON `{ body }`, one consolidated reply; the rest wait for the next wake-up.
 
 **Actions:**
 - Agree → controlled reply (`<!-- glados:reply-to:… -->` + `<!-- glados:agree -->`) → `resolveReviewThread` when `viewerCanResolve`.

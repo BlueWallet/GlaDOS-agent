@@ -19,7 +19,7 @@ Builds on `2026-08-05-review-thread-replies-design.md`.
 | Foreign threads | Never agreed with or resolved; once GLaDOS replied, any later human comment keeps the thread awaiting |
 | Conversation | Only explicit mentions count (flat thread; no "engaged" continuation) |
 | Bots | Bot authors (`author.__typename == "Bot"`) never trigger a foreign-thread or conversation reply; in an engaged foreign thread a bot comment counts only if it mentions GLaDOS. Prevents bot-to-bot loops |
-| Closed / merged PRs | No foreign-thread or conversation replies (own threads still answered) |
+| Closed / merged PRs | No foreign-thread or conversation replies (own threads still answered); PR state re-checked right before each such write |
 | Folder | Everything stays in `src/thread-replies/`; context fetch in `src/github/`, context format in `src/review/` |
 
 ## PR context block
@@ -95,10 +95,11 @@ isAwaitingMention(c) = author != login && !isMinimized
                     && mentionsLogin(c.body, login) && c.id ∉ acknowledgedIds
 ```
 
-One agent run per wake-up answers every awaiting mention in a single issue
-comment carrying one `<!-- glados:reply-to:<id> -->` per answered id. The
-prompt carries the PR context block plus the awaiting comments as untrusted
-JSON. Race safety: snapshot the full conversation right before the mention
+One agent run per wake-up answers up to `MENTION_BATCH` (10) oldest awaiting
+mentions in a single issue comment carrying one `<!-- glados:reply-to:<id> -->`
+per answered id; the rest stay awaiting for the next wake-up. The prompt
+carries the PR context block plus the batch as untrusted text, each body
+capped at 4k after escaping, so conversation spam cannot blow the prompt. Race safety: snapshot the full conversation right before the mention
 agent runs (after thread replies, so unrelated chatter during that run does not
 count); re-fetch before the write and skip the post (Phase A incomplete, no
 throw — the full review must still land) if any comment was added, edited, or
@@ -128,4 +129,5 @@ cli/notifications.ts
 
 - Mentions inside the PR description or review summary bodies
 - Replies on closed or merged PRs
-- Rate limiting of mention-triggered agent runs (anyone with access can trigger one)
+- Rate limiting of mention-triggered agent runs (anyone with access can trigger one; batching only bounds prompt size)
+- Re-answering a comment edited after it was acknowledged (markers bind to the comment id, as in Phase A)

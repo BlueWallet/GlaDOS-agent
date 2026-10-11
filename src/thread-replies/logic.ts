@@ -151,8 +151,9 @@ export function threadReplyKind(
 /** Whole-handle `@login` outside code spans, fenced blocks, and quoted lines. */
 export function mentionsLogin(body: string, login: string): boolean {
   const prose = body
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`\n]*`/g, "")
+    .replace(/(`{3,}|~{3,})[\s\S]*?\1/g, "")
+    // Inline span: a run of N backticks closed by the next run of N.
+    .replace(/(`+)[\s\S]*?\1/g, "")
     .split("\n")
     .filter((line) => !/^\s*>/.test(line))
     .join("\n");

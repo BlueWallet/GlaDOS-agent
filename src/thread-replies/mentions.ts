@@ -10,6 +10,11 @@ import {
 
 const REPLY_TO_MARKERS = /<!-- glados:reply-to:([^ ]+) -->/g;
 
+/** Mentions answered per agent run; the rest wait for the next wake-up. */
+export const MENTION_BATCH = 10;
+/** Per-mention body cap in the prompt, measured after escaping. */
+export const MENTION_BODY_CAP = 4_000;
+
 /** Ids acknowledged by controlled GLaDOS replies; forged markers never count. */
 export function acknowledgedCommentIds(
   comments: IssueComment[],
@@ -81,12 +86,16 @@ export function buildMentionReplyPrompt(
   prContextBlock: string,
   awaiting: IssueComment[],
 ): string {
-  const mentionData = awaiting.map((comment) => ({
-    id: comment.id,
-    author: comment.authorLogin,
-    createdAt: comment.createdAt,
-    body: stripGladosControlMarkers(comment.body),
-  }));
+  const mentionData = awaiting.map((comment) => {
+    const body = encodeUntrustedPromptData(
+      stripGladosControlMarkers(comment.body),
+    );
+    const capped =
+      body.length > MENTION_BODY_CAP
+        ? `${body.slice(0, MENTION_BODY_CAP)}\n… [truncated, ${body.length - MENTION_BODY_CAP} more chars]`
+        : body;
+    return `### ${encodeUntrustedPromptData(comment.id)} by ${encodeUntrustedPromptData(comment.authorLogin)} @ ${comment.createdAt}\n${capped}`;
+  });
 
   return [
     `You were mentioned in the conversation of pull request ${prUrl}.`,
@@ -101,7 +110,7 @@ export function buildMentionReplyPrompt(
     "",
     "Comments awaiting your reply:",
     "BEGIN_UNTRUSTED_MENTIONS",
-    encodeUntrustedPromptData(JSON.stringify(mentionData, null, 2)),
+    mentionData.join("\n\n"),
     "END_UNTRUSTED_MENTIONS",
     "",
     "Vibe:",
