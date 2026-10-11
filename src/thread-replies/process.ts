@@ -1,6 +1,12 @@
 import { CursorAgentError } from "@cursor/sdk";
 import { withPrLock, withPrWorkspace } from "../git/workspace.js";
 import {
+  createPrIssueComment,
+  listPrIssueComments,
+  type IssueComment,
+  type PullRequestState,
+} from "../github/comments.js";
+import {
   getAuthenticatedLogin,
   getReviewThread,
   listReviewThreads,
@@ -12,21 +18,29 @@ import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import { runAgentReview } from "../review/agent.js";
 import { buildGithubReview } from "../review/payload.js";
-import { logReviewError } from "../review/process.js";
+import { loadPrContextBlock, logReviewError } from "../review/process.js";
 import type { PullRequestRef } from "../types.js";
-import { runThreadReplies } from "./agent.js";
+import { runMentionReply, runThreadReplies } from "./agent.js";
 import {
   assertCurrentThreadSnapshots,
   formatReplyBody,
   formatSettledContext,
+  isAwaitingForeignThread,
   isAwaitingThread,
   isResolutionPending,
   listSettledFindings,
   needsResolveRetry,
   sanitizeReviewForPost,
   suppressSettledFindings,
+  threadReplyKind,
   type SettledFinding,
+  type ThreadReplyDecision,
 } from "./logic.js";
+import {
+  formatMentionReplyBody,
+  isCurrentConversationSnapshot,
+  listAwaitingMentions,
+} from "./mentions.js";
 
 export interface ThreadProcessResult {
   settled: SettledFinding[];
@@ -36,6 +50,8 @@ export interface ThreadProcessResult {
 interface ThreadState {
   login: string;
   threads: ReviewThread[];
+  prState: PullRequestState;
+  comments: IssueComment[];
 }
 
 interface ThreadOptions {
@@ -45,9 +61,9 @@ interface ThreadOptions {
 }
 
 /**
- * Full review with Phase A first: thread replies, then core review with
- * settled-finding suppression. This is the feature entrypoint for
- * review-requested PRs — swap for `processPrReview` to disable the feature.
+ * Full review with Phase A first: thread and mention replies, then core
+ * review with PR context and settled-finding suppression. This is the feature
+ * entrypoint for review-requested PRs — swap for `processPrReview` to disable.
  */
 export async function processPrReviewWithThreadReplies(
   pr: PullRequestRef,
@@ -74,13 +90,19 @@ export async function processPrReviewWithThreadReplies(
           });
 
           console.log(`  Reviewing ${pr.prUrl} ...`);
+          // Fetched after replies so the block includes them.
+          const prContext = await loadPrContextBlock(options.githubToken, pr);
           const settledContext = formatSettledContext(threadResult.settled);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
-            settledContext,
-            (draft) => suppressSettledFindings(draft, threadResult.settled),
+            {
+              prContext,
+              extraContext: settledContext,
+              filterDraft: (draft) =>
+                suppressSettledFindings(draft, threadResult.settled),
+            },
           );
           const filtered = suppressSettledFindings(
             payload,
@@ -138,14 +160,11 @@ async function processPrThreadRepliesUnlocked(
   options: Omit<ThreadOptions, "repoDir">,
 ): Promise<boolean> {
   const state = await loadThreadState(options.githubToken, pr);
-  const awaiting = state.threads.some((thread) =>
-    isAwaitingThread(thread, state.login),
-  );
-  if (!awaiting) {
+  if (!needsAgent(state)) {
     return (await processThreadState(pr, options, state)).complete;
   }
 
-  console.log(`  Cloning ${pr.owner}/${pr.repo} for thread replies...`);
+  console.log(`  Cloning ${pr.owner}/${pr.repo} for replies...`);
   const result = await withPrWorkspace(
     pr.owner,
     pr.repo,
@@ -154,6 +173,28 @@ async function processPrThreadRepliesUnlocked(
     (repoDir) => processThreadState(pr, { ...options, repoDir }, state),
   );
   return result.complete;
+}
+
+function needsAgent(state: ThreadState): boolean {
+  return (
+    awaitingThreads(state).length > 0 || awaitingMentions(state).length > 0
+  );
+}
+
+/** Own threads are always answered; foreign ones only while the PR is open. */
+function awaitingThreads(state: ThreadState): ReviewThread[] {
+  return state.threads.filter(
+    (thread) =>
+      isAwaitingThread(thread, state.login) ||
+      (state.prState === "OPEN" &&
+        isAwaitingForeignThread(thread, state.login)),
+  );
+}
+
+/** Closed and merged PRs are not conversations GLaDOS joins. */
+function awaitingMentions(state: ThreadState): IssueComment[] {
+  if (state.prState !== "OPEN") return [];
+  return listAwaitingMentions(state.comments, state.login);
 }
 
 async function processThreadState(
@@ -171,61 +212,126 @@ async function processThreadState(
     options.githubToken,
   );
 
-  const awaiting = threads.filter((thread) =>
-    isAwaitingThread(thread, login),
-  );
-  if (awaiting.length === 0) {
-    console.log("  No review threads awaiting a reply");
+  const awaiting = awaitingThreads(state);
+  const mentions = awaitingMentions(state);
+  if (awaiting.length === 0 && mentions.length === 0) {
+    console.log("  No review threads or mentions awaiting a reply");
     return { settled: [...settledById.values()], complete };
   }
-  if (!options.repoDir) {
-    throw new Error("Thread replies require a prepared PR workspace");
+  const repoDir = options.repoDir;
+  if (!repoDir) {
+    throw new Error("Replies require a prepared PR workspace");
   }
 
-  console.log(`  ${awaiting.length} thread(s) awaiting reply...`);
-  const decisions = await runThreadReplies(
-    options.repoDir,
-    pr.prUrl,
-    awaiting,
-    options.cursorApiKey,
-  );
-
-  const snapshotsById = new Map(
-    awaiting.map((thread) => [thread.id, thread]),
-  );
-
-  for (const decision of decisions) {
-    // Re-fetch immediately before each write. Earlier replies in this batch do
-    // not make later decisions safe if their discussions changed meanwhile.
-    const snapshot = snapshotsById.get(decision.threadId);
-    if (!snapshot) {
-      throw new Error(`Missing thread snapshot: ${decision.threadId}`);
-    }
-    const thread = await getReviewThread(
-      options.githubToken,
-      decision.threadId,
-    );
-    assertCurrentThreadSnapshots(
-      [snapshot],
-      thread ? [thread] : [],
+  if (awaiting.length > 0) {
+    console.log(`  ${awaiting.length} thread(s) awaiting reply...`);
+    const decisions = await runThreadReplies(
+      repoDir,
+      pr.prUrl,
+      awaiting,
+      options.cursorApiKey,
       login,
     );
-    if (!thread) {
-      throw new Error(`Thread disappeared before reply: ${decision.threadId}`);
-    }
-    const result = await applyThreadDecision(
-      options.githubToken,
-      thread,
-      decision,
-      login,
+
+    const snapshotsById = new Map(
+      awaiting.map((thread) => [thread.id, thread]),
     );
-    if (result.settled) {
-      settledById.set(result.settled.threadId, result.settled);
+
+    for (const decision of decisions) {
+      // Re-fetch immediately before each write. Earlier replies in this batch do
+      // not make later decisions safe if their discussions changed meanwhile.
+      const snapshot = snapshotsById.get(decision.threadId);
+      if (!snapshot) {
+        throw new Error(`Missing thread snapshot: ${decision.threadId}`);
+      }
+      const thread = await getReviewThread(
+        options.githubToken,
+        decision.threadId,
+      );
+      assertCurrentThreadSnapshots(
+        [snapshot],
+        thread ? [thread] : [],
+        login,
+        threadReplyKind(snapshot, login) === "own"
+          ? isAwaitingThread
+          : isAwaitingForeignThread,
+      );
+      if (!thread) {
+        throw new Error(`Thread disappeared before reply: ${decision.threadId}`);
+      }
+      const result = await applyThreadDecision(
+        options.githubToken,
+        thread,
+        decision,
+        login,
+      );
+      if (result.settled) {
+        settledById.set(result.settled.threadId, result.settled);
+      }
+      if (!result.complete) complete = false;
     }
-    if (!result.complete) complete = false;
+  }
+
+  if (mentions.length > 0) {
+    const replied = await replyToMentions(pr, { ...options, repoDir }, login);
+    if (!replied) complete = false;
   }
 
   return { settled: [...settledById.values()], complete };
+}
+
+/**
+ * Snapshot is taken here, after the thread agent ran, so unrelated chatter
+ * during that run does not invalidate the mention reply. A race leaves Phase A
+ * incomplete instead of failing the caller (the full review must still land).
+ */
+async function replyToMentions(
+  pr: PullRequestRef,
+  options: ThreadOptions & { repoDir: string },
+  login: string,
+): Promise<boolean> {
+  const snapshot = await listPrIssueComments(options.githubToken, pr);
+  const mentions =
+    snapshot.state === "OPEN"
+      ? listAwaitingMentions(snapshot.comments, login)
+      : [];
+  if (mentions.length === 0) return true;
+  console.log(`  ${mentions.length} mention(s) awaiting reply...`);
+
+  const prContext = await loadPrContextBlock(options.githubToken, pr);
+  const body = await runMentionReply(
+    options.repoDir,
+    pr.prUrl,
+    prContext,
+    mentions,
+    options.cursorApiKey,
+  );
+
+  // Re-fetch immediately before the write; any new or edited comment makes
+  // the answer stale.
+  const current = await listPrIssueComments(options.githubToken, pr);
+  if (!isCurrentConversationSnapshot(snapshot.comments, current.comments)) {
+    console.error("  Conversation changed while evaluating mentions; retrying later");
+    return false;
+  }
+  await createPrIssueComment(
+    options.githubToken,
+    pr,
+    formatMentionReplyBody(
+      body,
+      mentions.map((comment) => comment.id),
+    ),
+  );
+  console.log(`  Replied to ${mentions.length} mention(s) in the conversation`);
+
+  const updated = await listPrIssueComments(options.githubToken, pr);
+  const remaining = listAwaitingMentions(updated.comments, login);
+  if (remaining.length > 0) {
+    console.error(
+      `  ${remaining.length} mention(s) arrived while posting; retrying later`,
+    );
+  }
+  return remaining.length === 0;
 }
 
 async function retryPendingResolutions(
@@ -251,7 +357,7 @@ async function retryPendingResolutions(
 async function applyThreadDecision(
   githubToken: string,
   thread: ReviewThread,
-  decision: { decision: "agree" | "disagree"; body: string },
+  decision: ThreadReplyDecision,
   login: string,
 ): Promise<{ settled?: SettledFinding; complete: boolean }> {
   const root = thread.comments[0];
@@ -259,17 +365,31 @@ async function applyThreadDecision(
   const replyTo = thread.comments.at(-1);
   if (!replyTo) throw new Error(`Thread ${thread.id} has no reply target`);
 
+  // Kind comes from the thread, never from the agent: a foreign thread is
+  // only ever answered, never agreed with or resolved.
+  const kind = threadReplyKind(thread, login);
+  const posted: ThreadReplyDecision["decision"] =
+    kind === "foreign" ? "reply" : decision.decision;
+
   await replyToReviewThread(
     githubToken,
     thread.id,
-    formatReplyBody(decision.decision, decision.body, replyTo.id),
+    formatReplyBody(posted, decision.body, replyTo.id),
   );
-  console.log(`  Replied (${decision.decision}) on ${thread.path}`);
+  console.log(`  Replied (${posted}) on ${thread.path}`);
 
   const updated = await getReviewThread(githubToken, thread.id);
   if (!updated) throw new Error(`Thread disappeared after reply: ${thread.id}`);
 
-  if (decision.decision === "disagree") {
+  if (posted === "reply") {
+    const complete = !isAwaitingForeignThread(updated, login);
+    if (!complete) {
+      console.error(`  Thread ${thread.id} changed while posting; retrying later`);
+    }
+    return { complete };
+  }
+
+  if (posted === "disagree") {
     const complete = !isAwaitingThread(updated, login);
     if (!complete) {
       console.error(`  Thread ${thread.id} changed while posting; retrying later`);
@@ -314,11 +434,17 @@ async function loadThreadState(
   githubToken: string,
   pr: PullRequestRef,
 ): Promise<ThreadState> {
-  const [login, threads] = await Promise.all([
+  const [login, threads, conversation] = await Promise.all([
     getAuthenticatedLogin(githubToken),
     listReviewThreads(githubToken, pr),
+    listPrIssueComments(githubToken, pr),
   ]);
-  return { login, threads };
+  return {
+    login,
+    threads,
+    prState: conversation.state,
+    comments: conversation.comments,
+  };
 }
 
 function logCannotResolve(threadId: string): void {

@@ -1,9 +1,11 @@
 import { CursorAgentError } from "@cursor/sdk";
 import { withPrLock, withPrWorkspace } from "../git/workspace.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
+import { fetchPrContext } from "../github/pr-context.js";
 import { postGithubReview } from "../github/reviews.js";
 import type { PullRequestRef } from "../types.js";
 import { runAgentReview } from "./agent.js";
+import { formatPrContext } from "./context.js";
 import { buildGithubReview } from "./payload.js";
 
 /**
@@ -31,10 +33,12 @@ export async function processPrReview(
         options.githubToken,
         async (repoDir) => {
           console.log(`  Reviewing ${pr.prUrl} ...`);
+          const prContext = await loadPrContextBlock(options.githubToken, pr);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
+            { prContext },
           );
           const review = buildGithubReview(payload);
           console.log(`  Verdict: ${review.event}`);
@@ -48,6 +52,18 @@ export async function processPrReview(
     logReviewError(err);
     return false;
   }
+}
+
+/** Fetch and render the PR context block for the review prompts. */
+export async function loadPrContextBlock(
+  githubToken: string,
+  pr: PullRequestRef,
+): Promise<string> {
+  const { text, omitted } = formatPrContext(
+    await fetchPrContext(githubToken, pr),
+  );
+  console.log(`  PR context: ${text.length} chars, ${omitted} items omitted`);
+  return text;
 }
 
 export function logReviewError(err: unknown): void {

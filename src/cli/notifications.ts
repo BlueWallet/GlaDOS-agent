@@ -67,7 +67,7 @@ try {
     );
     if (notifiedPr) {
       console.log(
-        `  Checking review threads on ${notifiedPr.owner}/${notifiedPr.repo}#${notifiedPr.prNumber}`,
+        `  Checking review threads and mentions on ${notifiedPr.owner}/${notifiedPr.repo}#${notifiedPr.prNumber}`,
       );
       const ok = await processPrThreadReplies(notifiedPr, {
         githubToken: token,
