@@ -257,6 +257,19 @@ test("parseReviewResult still accepts the shared review schema", () => {
   assert.equal(parsed.findings[0]?.line, 3);
 });
 
+test("parseReviewResult keeps a markdown fence inside finding text", () => {
+  const body = "extractJson uses /```(?:json)?\\s*([\\s\\S]*?)```/";
+  const parsed = parseReviewResult(
+    JSON.stringify({
+      summary: "ok",
+      findings: [
+        { severity: "high", path: "src/review/payload.ts", line: 408, body },
+      ],
+    }),
+  );
+  assert.equal(parsed.findings[0]?.body, body);
+});
+
 test("review parsers reject malformed findings instead of silently approving", () => {
   assert.throws(
     () => parseReviewResult('{"summary":"bad","findings":{}}'),
