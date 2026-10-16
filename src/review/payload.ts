@@ -406,11 +406,10 @@ function parsePayloadEnvelope(text: string): {
 
 function extractJson(text: string): string {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("```")) return trimmed;
-  return trimmed
-    .replace(/^```(?:json)?\s*/, "")
-    .replace(/\s*```$/, "")
-    .trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end <= start) return trimmed;
+  return trimmed.slice(start, end + 1);
 }
 
 function isBlocker(severity: Severity): boolean {
