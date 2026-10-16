@@ -9,6 +9,7 @@ import {
   parseReviewResult,
   parseVerifiedReviewResult,
   type ReviewPayload,
+  type ReviewPromptOptions,
   undisprovenBlockers,
 } from "./payload.js";
 
@@ -32,19 +33,24 @@ export function reviewModelParams(modelId: string): Array<{ id: string; value: s
   ];
 }
 
+export interface AgentReviewOptions extends ReviewPromptOptions {
+  /** Applied to the draft before verification (e.g. settled-finding suppression). */
+  filterDraft?: (draft: ReviewPayload) => ReviewPayload;
+}
+
 export async function runAgentReview(
   repoDir: string,
   prUrl: string,
   cursorApiKey: string,
-  extraContext = "",
-  filterDraft: (draft: ReviewPayload) => ReviewPayload = (draft) => draft,
+  options: AgentReviewOptions = {},
 ): Promise<ReviewPayload> {
+  const { filterDraft = (draft) => draft, ...promptOptions } = options;
   const draftModel = reviewDraftModel();
   const draftParams = reviewModelParams(draftModel);
   const draftLabel = formatModelLabel(draftModel, draftParams);
   console.log(`  Draft review (${draftLabel})...`);
   const drafted = await runReviewPass(
-    buildReviewPrompt(prUrl, extraContext),
+    buildReviewPrompt(prUrl, promptOptions),
     repoDir,
     cursorApiKey,
     draftModel,
@@ -68,7 +74,7 @@ export async function runAgentReview(
   const verifyLabel = formatModelLabel(verifyModel, verifyParams);
   console.log(`  Verify review (${verifyLabel}, ${draft.findings.length} candidate(s))...`);
   const verified = await runReviewPass(
-    buildVerifyPrompt(prUrl, draft, extraContext),
+    buildVerifyPrompt(prUrl, draft, promptOptions),
     repoDir,
     cursorApiKey,
     verifyModel,

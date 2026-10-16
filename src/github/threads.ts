@@ -6,6 +6,8 @@ export interface ReviewThreadComment {
   id: string;
   body: string;
   authorLogin: string;
+  /** GitHub App / bot account. Bots never trigger foreign-thread replies. */
+  authorIsBot: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -14,6 +16,8 @@ export interface ReviewThread {
   /** GraphQL PullRequestReviewThread id (PRRT_…) */
   id: string;
   isResolved: boolean;
+  /** Diff line no longer exists on the current head; `line` is then null. */
+  isOutdated: boolean;
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
@@ -32,12 +36,13 @@ interface GqlComment {
   body: string;
   createdAt: string;
   updatedAt: string;
-  author: { login: string } | null;
+  author: { login: string; __typename: string } | null;
 }
 
 interface GqlThread {
   id: string;
   isResolved: boolean;
+  isOutdated: boolean;
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
@@ -85,6 +90,7 @@ export async function listReviewThreads(
               nodes {
                 id
                 isResolved
+                isOutdated
                 viewerCanResolve
                 path
                 line
@@ -95,7 +101,7 @@ export async function listReviewThreads(
                     body
                     createdAt
                     updatedAt
-                    author { login }
+                    author { login __typename }
                   }
                 }
               }
@@ -141,6 +147,7 @@ export async function getReviewThread(
         ... on PullRequestReviewThread {
           id
           isResolved
+          isOutdated
           viewerCanResolve
           path
           line
@@ -151,7 +158,7 @@ export async function getReviewThread(
               body
               createdAt
               updatedAt
-              author { login }
+              author { login __typename }
             }
           }
         }
@@ -169,6 +176,7 @@ async function materializeThread(
   return {
     id: node.id,
     isResolved: node.isResolved,
+    isOutdated: node.isOutdated,
     viewerCanResolve: node.viewerCanResolve,
     path: node.path,
     line: node.line,
@@ -204,7 +212,7 @@ async function loadAllComments(
                 body
                 createdAt
                 updatedAt
-                author { login }
+                author { login __typename }
               }
             }
           }
@@ -243,6 +251,7 @@ function mapComments(nodes: GqlComment[]): ReviewThreadComment[] {
       id: node.id,
       body: node.body,
       authorLogin: node.author?.login ?? "",
+      authorIsBot: node.author?.__typename === "Bot",
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
     };

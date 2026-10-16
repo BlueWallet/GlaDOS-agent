@@ -1,9 +1,9 @@
 # cursor-glados — agent guide
 
-GLaDOS reviews open PRs with a pending review request for the authenticated user, and replies when humans respond on its review-comment threads.
+GLaDOS reviews open PRs with a pending review request for the authenticated user, replies when humans respond on its review-comment threads, and answers `@mention`s in other threads and in the PR conversation.
 
-1. **Full review:** GitHub Search finds `review-requested:@me` PRs → clone → Cursor SDK local agent → post summary + inline comments (`APPROVE` or `REQUEST_CHANGES`).
-2. **Thread replies (optional feature):** On every PR notification wake-up (and before each full review) → inspect GLaDOS review threads → agree (reply + resolve) or disagree (reply, leave open). Settled agreements are never re-raised on later reviews of that PR.
+1. **Full review:** GitHub Search finds `review-requested:@me` PRs → clone → fetch PR context (title, body, base, linked issues, reviews, conversation, threads) → Cursor SDK local agent → post summary + inline comments (`APPROVE` or `REQUEST_CHANGES`).
+2. **Replies (optional feature):** On every PR notification wake-up (and before each full review) → own threads: agree (reply + resolve) or disagree (reply, leave open); foreign threads and conversation comments that mention GLaDOS: plain reply. Settled agreements are never re-raised on later reviews of that PR.
 
 TypeScript, ESM (`"type": "module"`), Node ≥ 22.13. Run scripts with `tsx`.
 
@@ -44,18 +44,22 @@ src/
     pr.ts               # search review-requested PRs, pending-reviewer check, notification → PR ref
     diff.ts             # getCommentableLines() — RIGHT-side lines that accept comments
     reviews.ts          # postGithubReview() — validate vs diff, then createReview
-    threads.ts          # GraphQL: list/get review threads, reply, resolve (thread-replies I/O)
+    threads.ts          # GraphQL: list/get review threads (core context), reply, resolve (feature)
+    comments.ts         # GraphQL: list PR conversation + state (core context); createPrIssueComment (feature)
+    pr-context.ts       # fetchPrContext() — PR core, linked issues, reviews, comments, threads
 
   review/               # core PR review feature — no thread-reply knowledge
-    process.ts          # processPrReview() — orchestration only
+    process.ts          # processPrReview(), loadPrContextBlock() — orchestration only
     agent.ts            # runAgentReview() / promptLocalAgent() — Cursor SDK + sandbox/env
     payload.ts          # draft + verify prompts, parse, merge, GitHub formatting
+    context.ts          # formatPrContext() — tiered budget, HTML-comment strip, untrusted escaping
 
   thread-replies/       # optional feature — delete this folder to rip out
     index.ts            # public API only (import from here outside the folder)
-    process.ts          # Phase A + compose with full review
-    agent.ts            # runThreadReplies()
-    logic.ts            # classification, markers, suppress, Phase A prompt/parse
+    process.ts          # Phase A (threads + mentions) + compose with full review
+    agent.ts            # runThreadReplies(), runMentionReply()
+    logic.ts            # thread classification (own/foreign), markers, suppress, thread prompt/parse
+    mentions.ts         # conversation mentions: awaiting, snapshot, prompt/parse, reply body
 ```
 
 Co-located `*.test.ts` files use Node’s built-in test runner (`npm test`).
@@ -64,14 +68,14 @@ Co-located `*.test.ts` files use Node’s built-in test runner (`npm test`).
 
 | Feature | Folder | CLI wiring |
 |---------|--------|------------|
-| Core PR review | `src/review/` | `processPrReview` |
-| Thread replies | `src/thread-replies/` | `processPrReviewWithThreadReplies`, `processPrThreadReplies` |
+| Core PR review | `src/review/` + `src/github/pr-context.ts` | `processPrReview` |
+| Replies (threads + mentions) | `src/thread-replies/` | `processPrReviewWithThreadReplies`, `processPrThreadReplies` |
 
-Today the CLI imports only from `thread-replies/` for reviews (that composer calls core review pieces). To disable thread replies:
+Today the CLI imports only from `thread-replies/` for reviews (that composer calls core review pieces). To disable replies:
 
 1. In `cli/notifications.ts`, call `processPrReview` instead of `processPrReviewWithThreadReplies`, and remove the PR-notification → `processPrThreadReplies` branch (mark those notifications done like others).
 2. Delete `src/thread-replies/`.
-3. Delete `src/github/threads.ts` if unused.
+3. Keep `src/github/threads.ts` and `src/github/comments.ts` — their list functions feed the PR context. The mutations (`replyToReviewThread`, `resolveReviewThread`, `createPrIssueComment`) may be deleted.
 4. Trim this guide’s Phase A sections.
 
 New optional features get their own top-level folder under `src/` with an `index.ts` public surface; CLI wires them. Do not push feature logic into `review/`.
@@ -86,12 +90,13 @@ cli/notifications.ts
   → per review-requested PR:
        thread-replies.processPrReviewWithThreadReplies()
          → withPrLock + withPrWorkspace
-         → Phase A (processReviewThreads)
-         → review/agent.runAgentReview(+ settled context)
+         → Phase A (processReviewThreads: own + foreign threads, then mentions)
+         → review/process.loadPrContextBlock()        # after replies, so they are included
+         → review/agent.runAgentReview(+ prContext + settled context)
          → suppressSettledFindings + sanitize markers
          → payload.buildGithubReview → reviews.postGithubReview
   → per PullRequest notification (wake-up only; GitHub coalesces PR activity):
-       thread-replies.processPrThreadReplies()       # Phase A only; clone only if a reply is needed
+       thread-replies.processPrThreadReplies()       # Phase A only; clone only if a thread or mention awaits
        markNotificationDone() only if Phase A complete
   → other notifications: markNotificationDone()
 ```
@@ -102,31 +107,47 @@ cli/notifications.ts
 
 **Per-PR lock:** `withPrLock()` serializes overlapping local CLI runs so two processes cannot reply/review the same PR at once.
 
-## Phase A — thread replies (`src/thread-replies/`)
+## Phase A — replies (`src/thread-replies/`)
 
-**Awaiting:** root comment by GLaDOS, unresolved, not settled, and there is an unacknowledged human reply (anyone) after GLaDOS’s last acknowledgment.
+**Thread kind** (`threadReplyKind`): `own` when the root comment is GLaDOS’s, else `foreign`.
 
-**Agent:** `runThreadReplies()` with thread history + local checkout → JSON `{ replies: [{ threadId, decision: "agree"|"disagree", body }] }` — exactly one decision per awaiting thread.
+**Awaiting own thread** (`isAwaitingThread`): unresolved, not settled, and an unacknowledged human reply (anyone) after GLaDOS’s last acknowledgment.
+
+**Awaiting foreign thread** (`isAwaitingForeignThread`): unresolved and either GLaDOS has not replied yet and a human comment mentions `@<login>`, or GLaDOS already replied (controlled marker) and a human commented after the acknowledged id.
+
+**Awaiting mention** (`listAwaitingMentions`, `mentions.ts`): PR conversation comment by someone else, not minimized, mentions `@<login>`, and its id is not in any GLaDOS reply-to marker. Only explicit mentions count in the flat conversation.
+
+**Bots and closed PRs:** bot authors never trigger foreign-thread or conversation replies; in an engaged foreign thread a bot comment counts only if it mentions GLaDOS (no bot-to-bot loops). Foreign-thread and conversation replies are skipped when the PR is not `OPEN` (state re-checked right before the write); own threads are always answered.
+
+`mentionsLogin()` matches the whole handle (`[A-Za-z0-9-]` boundary, case-insensitive) outside fenced blocks, inline code, and quoted lines.
+
+**Agents:**
+- `runThreadReplies()` — thread history (with `kind`) + local checkout → JSON `{ replies: [{ threadId, decision: "agree"|"disagree"|"reply", body }] }`, exactly one per awaiting thread; `reply` is required for foreign threads and rejected for own ones.
+- `runMentionReply()` — PR context block + up to `MENTION_BATCH` (10) oldest awaiting comments (bodies capped at 4k after escaping) → JSON `{ body }`, one consolidated reply; the rest wait for the next wake-up.
 
 **Actions:**
 - Agree → controlled reply (`<!-- glados:reply-to:… -->` + `<!-- glados:agree -->`) → `resolveReviewThread` when `viewerCanResolve`.
 - Disagree → controlled reply with acknowledgment marker only; leave open. Back-and-forth continues indefinitely whenever someone replies after GLaDOS.
+- Foreign reply → acknowledgment marker only; never agree, never resolve. The kind is derived from the thread, not from the agent output.
+- Mention reply → one issue comment with one reply-to marker per answered comment id.
 - Agreed but unresolved → retry resolve only (no new agent reply). If `viewerCanResolve` is false, leave Phase A incomplete so the notification is retained for later retry; still treat the issue as settled for the following full review.
 
-**Race safety:** re-fetch the target thread immediately before each write; compare full comment id/body/`updatedAt` snapshots. After posting, reconcile — if a human raced in, the thread stays awaiting.
+**Race safety:** re-fetch the target thread (or the whole conversation) immediately before each write; compare full comment id/body/`updatedAt` (and `isMinimized`) snapshots. The conversation snapshot is taken right before the mention agent runs; a race skips the post and leaves Phase A incomplete without failing the full review. After posting, reconcile — if a human raced in, the thread or mention stays awaiting.
 
-**Markers:** appended only by `formatReplyBody()` / controlled code in `thread-replies/logic.ts`. Stripped before posting reviews via `sanitizeReviewForPost()`. Root findings never count as agreements.
+**Markers:** appended only by `formatReplyBody()` / `formatMentionReplyBody()` in `thread-replies/`; agent text is stripped of markers until stable so nested fragments cannot reassemble one. Stripped before posting reviews via `sanitizeReviewForPost()`. Root findings never count as agreements; an agree marker on a human-rooted thread never settles it.
 
 ## Full review (`src/review/`)
+
+**PR context block** (`loadPrContextBlock` → `github/pr-context.fetchPrContext` + `review/context.formatPrContext`): title, description, base branch, head sha, author, linked issues (`closingIssuesReferences`), every review (own reviews labelled `(you, GLaDOS)`; `PENDING` and empty `COMMENTED` dropped), the conversation (minimized skipped), and every review thread (path:line, resolved/outdated, all comments). All HTML comments are stripped (hides PR-template boilerplate and control markers without feature knowledge); bodies are `<>&`-escaped with `BEGIN_/END_UNTRUSTED` fence tokens broken, then capped after escaping (4k; 12k for the description; linked issues shrink so header + issues fit in half the budget). Budget 50k chars by tier: header + issues (never omitted) → own open threads → own reviews → others’ reviews → others’ open threads → conversation → resolved threads; newest first within a tier; `[N older items omitted]` per section. Both prompts fence it as `BEGIN_UNTRUSTED_PR_CONTEXT … END_UNTRUSTED_PR_CONTEXT` and tell the agent to diff against the named base branch, that discussion is claims not proof, and not to repeat verbatim a finding already in an own open thread.
 
 Two agent passes, then optional settled-finding suppression:
 
 1. **Draft** (`buildReviewPrompt`, `grok-4.7` `reasoning_effort=xhigh`, `fast=false` / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
-2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Evidence is checked only for visible text, not for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass.
+2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. With the PR context block present, a candidate may be dropped when the author explained it as a deliberate choice **and** the code confirms it (both cited); a comment alone never disproves a critical/high candidate. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Evidence is checked only for visible text, not for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass.
 
 **Severity:** `critical` = bugs, security, data loss, broken functionality. `high` = architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior. `medium`/`low` = style, optimization, docs polish.
 
-When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
+When composed with replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()` alongside `prContext`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings in code; the prompt only asks not to repeat them verbatim.
 
 **Approve vs request changes:** `critical` or `high` → `REQUEST_CHANGES`; else `APPROVE`.
 
@@ -154,17 +175,20 @@ When composed with thread replies, settled findings (original body + agreement r
 | What | Where |
 |------|--------|
 | Reviewer instructions / JSON schema | `review/payload.ts` → `buildReviewPrompt()` / `buildVerifyPrompt()` / `buildVoicePrompt()` |
+| PR context budget, tiers, rendering | `review/context.ts` → `formatPrContext()` / `PR_CONTEXT_BUDGET` |
+| PR context sources | `github/pr-context.ts` → `fetchPrContext()` |
 | Severity levels | `review/payload.ts` → `SEVERITIES` + `Severity` |
 | GLaDOS voice | `review/payload.ts` → `buildVerifyPrompt()`; `applyPersonality()` still wraps at post time |
 | Thread reply prompt / classification / suppress | `thread-replies/logic.ts` |
+| Mention detection / prompt / reply body | `thread-replies/mentions.ts` |
 | Phase A + compose with review | `thread-replies/process.ts` |
 | Core review wiring | `review/process.ts` (no business logic) |
 | Clone / lock / cleanup | `git/workspace.ts` |
 | GitHub I/O | `github/` |
 
-Tune **draft prompt**, **verify prompt**, **voice prompt**, **thread-reply prompt**, and **personality** independently.
+Tune **draft prompt**, **verify prompt**, **voice prompt**, **thread-reply prompt**, **mention prompt**, and **personality** independently.
 
-Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.md`.
+Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.md`, `docs/superpowers/specs/2026-10-11-pr-context-and-mentions-design.md`.
 
 ## Conventions
 
@@ -180,7 +204,7 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 
 | Variable | Used for |
 |----------|----------|
-| `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, reviews, thread reply/resolve) |
+| `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, PR context reads, reviews, thread reply/resolve, conversation comments) |
 | `CURSOR_API_KEY` | Cursor SDK local agent runs |
 | `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `grok-4.7`, `reasoning_effort=xhigh`, `fast=false`) |
 | `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `grok-4.7`, `reasoning_effort=xhigh`, `fast=false`) |
