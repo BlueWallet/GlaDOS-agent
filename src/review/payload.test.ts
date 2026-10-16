@@ -257,6 +257,14 @@ test("parseReviewResult still accepts the shared review schema", () => {
   assert.equal(parsed.findings[0]?.line, 3);
 });
 
+test("parseReviewResult ignores a sentence before the JSON object", () => {
+  const parsed = parseReviewResult(
+    'The cold-start gate checks out.\n\n{"summary":"ok","findings":[{"severity":"low","path":"a.ts","line":1,"body":"note"}]}',
+  );
+  assert.equal(parsed.summary, "ok");
+  assert.equal(parsed.findings[0]?.body, "note");
+});
+
 test("parseReviewResult keeps a markdown fence inside finding text", () => {
   const body = "extractJson uses /```(?:json)?\\s*([\\s\\S]*?)```/";
   const parsed = parseReviewResult(
