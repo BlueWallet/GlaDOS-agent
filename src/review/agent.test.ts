@@ -48,7 +48,7 @@ test("review models default and honor env overrides", () => {
     assert.equal(reviewDraftModel(), REVIEW_DRAFT_MODEL);
     assert.deepEqual(reviewModelParams(REVIEW_DRAFT_MODEL), [
       { id: "reasoning_effort", value: "xhigh" },
-      { id: "fast", value: "false" },
+      { id: "fast", value: "true" },
     ]);
     assert.equal(reviewVerifyModel(), REVIEW_VERIFY_MODEL);
 

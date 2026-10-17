@@ -28,7 +28,7 @@ export function reviewModelParams(modelId: string): Array<{ id: string; value: s
   if (modelId !== "grok-4.7") return undefined;
   return [
     { id: "reasoning_effort", value: "xhigh" },
-    { id: "fast", value: "false" },
+    { id: "fast", value: "true" },
   ];
 }
 
