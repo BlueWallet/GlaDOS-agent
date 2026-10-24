@@ -129,7 +129,9 @@ export function formatAgentRunLog(
   const params = result.model?.params?.map((param) => `${param.id}=${param.value}`).join(",");
   const model = result.model?.id ? `${result.model.id}${params ? `(${params})` : ""}` : "?";
   const usage = result.usage;
-  const tokens = usage ? `${usage.inputTokens}/${usage.outputTokens}/${usage.totalTokens}` : "?";
+  const tokens = usage
+    ? `in=${usage.inputTokens} out=${usage.outputTokens} cache_read=${usage.cacheReadTokens} cache_write=${usage.cacheWriteTokens} total=${usage.totalTokens}`
+    : "?";
   const status = result.status === "finished" ? "" : ` status=${result.status}`;
   return `  ${label}: model=${model} tokens=${tokens} request=${result.requestId ?? "?"}${status}`;
 }

@@ -107,7 +107,7 @@ test("agent run log shows resolved model, token usage, and request id", () => {
       },
       requestId: "req-1",
     }),
-    "  draft: model=grok-4.7(reasoning_effort=xhigh,fast=true) tokens=1200/340/1590 request=req-1",
+    "  draft: model=grok-4.7(reasoning_effort=xhigh,fast=true) tokens=in=1200 out=340 cache_read=50 cache_write=0 total=1590 request=req-1",
   );
   assert.equal(
     formatAgentRunLog("verify", { status: "error" }),
