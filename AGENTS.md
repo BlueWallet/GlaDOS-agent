@@ -15,7 +15,7 @@ export CURSOR_API_KEY='cursor_...'
 
 npm run notifications              # review-requested PRs + PR notification wake-ups; clear inbox
 npm run notifications -- --all     # include read notifications when listing inbox
-npm run smoke                      # local Cursor SDK smoke test (cwd = this repo)
+npm run smoke                      # local Cursor SDK smoke test (cwd = this repo; model `auto` / `GLADOS_REVIEW_MODEL`)
 npm test                           # unit tests (node:test via tsx)
 npm run typecheck                  # TypeScript check (CI "lint")
 ```

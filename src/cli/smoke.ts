@@ -1,4 +1,5 @@
 import { Agent, CursorAgentError } from "@cursor/sdk";
+import { formatAgentRunLog, reviewDraftModel, reviewModelParams } from "../review/agent.js";
 
 const apiKey = process.env.CURSOR_API_KEY;
 if (!apiKey) {
@@ -9,12 +10,16 @@ if (!apiKey) {
 
 const prompt = process.argv.slice(2).join(" ") || "List the top-level files in this repo.";
 
+const modelId = reviewDraftModel();
+const modelParams = reviewModelParams(modelId);
+
 try {
   const result = await Agent.prompt(prompt, {
     apiKey,
-    model: { id: "composer-2.5" },
+    model: modelParams ? { id: modelId, params: modelParams } : { id: modelId },
     local: { cwd: process.cwd() },
   });
+  console.log(formatAgentRunLog("smoke", result));
 
   if (result.status === "error") {
     console.error(`run failed: ${result.id}`);
