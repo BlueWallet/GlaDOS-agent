@@ -1,4 +1,4 @@
-import { Agent } from "@cursor/sdk";
+import { Agent, type RunResult } from "@cursor/sdk";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -49,6 +49,7 @@ export async function runAgentReview(
     repoDir,
     cursorApiKey,
     draftModel,
+    "draft",
     parseReviewResult,
   );
   const draft = filterDraft(drafted);
@@ -59,6 +60,7 @@ export async function runAgentReview(
       repoDir,
       cursorApiKey,
       draftModel,
+      "voice",
       parseReviewResult,
     );
     return { summary: voiced.summary, findings: [] };
@@ -73,6 +75,7 @@ export async function runAgentReview(
     repoDir,
     cursorApiKey,
     verifyModel,
+    "verify",
     parseVerifiedReviewResult,
   );
   const merged = mergeVerifiedFindings(draft, verified);
@@ -109,11 +112,26 @@ function formatModelLabel(
 
 export function agentRunFailureMessage(
   label: string,
-  result: { status: string; id: string; error?: { message: string } },
+  result: { status: string; id: string; error?: { message: string; code?: string } },
 ): string {
-  const detail = result.error?.message.trim();
+  const message = result.error?.message.trim();
+  const code = result.error?.code?.trim();
+  const detail = code ? `[${code}] ${message ?? ""}`.trim() : message;
   const base = `${label} ${result.status}: ${result.id}`;
   return detail ? `${base}: ${detail}` : base;
+}
+
+/** One log line per agent pass: server-resolved model, token usage, request id. */
+export function formatAgentRunLog(
+  label: string,
+  result: Pick<RunResult, "status" | "model" | "usage" | "requestId">,
+): string {
+  const params = result.model?.params?.map((param) => `${param.id}=${param.value}`).join(",");
+  const model = result.model?.id ? `${result.model.id}${params ? `(${params})` : ""}` : "?";
+  const usage = result.usage;
+  const tokens = usage ? `${usage.inputTokens}/${usage.outputTokens}/${usage.totalTokens}` : "?";
+  const status = result.status === "finished" ? "" : ` status=${result.status}`;
+  return `  ${label}: model=${model} tokens=${tokens} request=${result.requestId ?? "?"}${status}`;
 }
 
 async function runReviewPass<T>(
@@ -121,9 +139,10 @@ async function runReviewPass<T>(
   repoDir: string,
   cursorApiKey: string,
   modelId: string,
+  label: string,
   parse: (text: string) => T,
 ): Promise<T> {
-  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId);
+  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId, label);
 
   if (result.status !== "finished") {
     throw new Error(agentRunFailureMessage("Review", result));
@@ -152,7 +171,8 @@ export async function promptLocalAgent(
   repoDir: string,
   cursorApiKey: string,
   modelId = reviewDraftModel(),
-) {
+  label = "agent",
+): Promise<RunResult> {
   // Use the temp parent as the Cursor workspace. Repository-controlled
   // .cursor/sandbox.json then remains review data, not active sandbox policy.
   const workspaceDir = dirname(repoDir);
@@ -170,7 +190,7 @@ export async function promptLocalAgent(
   ].join("\n");
 
   const modelParams = reviewModelParams(modelId);
-  return withSanitizedAgentEnvironment(
+  const result = await withSanitizedAgentEnvironment(
     () =>
       Agent.prompt(scopedPrompt, {
         apiKey: cursorApiKey,
@@ -192,6 +212,8 @@ export async function promptLocalAgent(
       TEMP: agentTmp,
     },
   );
+  console.log(formatAgentRunLog(label, result));
+  return result;
 }
 
 /**

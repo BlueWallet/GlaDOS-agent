@@ -4,6 +4,7 @@ import {
   REVIEW_DRAFT_MODEL,
   REVIEW_VERIFY_MODEL,
   agentRunFailureMessage,
+  formatAgentRunLog,
   reviewDraftModel,
   reviewModelParams,
   reviewVerifyModel,
@@ -81,6 +82,36 @@ test("failed agent runs include the SDK error message", () => {
   assert.equal(
     agentRunFailureMessage("Review", { status: "cancelled", id: "run-2" }),
     "Review cancelled: run-2",
+  );
+  assert.equal(
+    agentRunFailureMessage("Review", {
+      status: "error",
+      id: "run-3",
+      error: { message: "You're out of usage.", code: "usage_limit" },
+    }),
+    "Review error: run-3: [usage_limit] You're out of usage.",
+  );
+});
+
+test("agent run log shows resolved model, token usage, and request id", () => {
+  assert.equal(
+    formatAgentRunLog("draft", {
+      status: "finished",
+      model: { id: "grok-4.7", params: [{ id: "reasoning_effort", value: "xhigh" }, { id: "fast", value: "true" }] },
+      usage: {
+        inputTokens: 1200,
+        outputTokens: 340,
+        cacheReadTokens: 50,
+        cacheWriteTokens: 0,
+        totalTokens: 1590,
+      },
+      requestId: "req-1",
+    }),
+    "  draft: model=grok-4.7(reasoning_effort=xhigh,fast=true) tokens=1200/340/1590 request=req-1",
+  );
+  assert.equal(
+    formatAgentRunLog("verify", { status: "error" }),
+    "  verify: model=? tokens=? request=? status=error",
   );
 });
 
