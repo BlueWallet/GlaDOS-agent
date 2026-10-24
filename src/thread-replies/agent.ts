@@ -1,5 +1,5 @@
 import type { ReviewThread } from "../github/threads.js";
-import { agentRunFailureMessage, promptLocalAgent } from "../review/agent.js";
+import { agentRunFailureMessage, promptLocalAgent, reviewDraftModel } from "../review/agent.js";
 import {
   buildThreadReplyPrompt,
   parseThreadReplyResult,
@@ -19,6 +19,8 @@ export async function runThreadReplies(
     buildThreadReplyPrompt(prUrl, threads),
     repoDir,
     cursorApiKey,
+    reviewDraftModel(),
+    "thread replies",
   );
 
   if (result.status !== "finished") {

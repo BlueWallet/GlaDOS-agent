@@ -1,4 +1,4 @@
-import { Agent } from "@cursor/sdk";
+import { Agent, type RunResult } from "@cursor/sdk";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -12,8 +12,9 @@ import {
   undisprovenBlockers,
 } from "./payload.js";
 
-export const REVIEW_DRAFT_MODEL = "grok-4.7";
-export const REVIEW_VERIFY_MODEL = "grok-4.7";
+/** Cursor "Auto": the server picks the model, and it keeps working after plan usage runs out. */
+export const REVIEW_DRAFT_MODEL = "auto";
+export const REVIEW_VERIFY_MODEL = "auto";
 
 export function reviewDraftModel(): string {
   return process.env.GLADOS_REVIEW_MODEL || REVIEW_DRAFT_MODEL;
@@ -23,7 +24,7 @@ export function reviewVerifyModel(): string {
   return process.env.GLADOS_VERIFY_MODEL || REVIEW_VERIFY_MODEL;
 }
 
-/** Grok 4.7 standard tier at xhigh. Other models get no params. */
+/** Grok 4.7 (only via env override) runs standard tier at xhigh. Other models, including auto, get no params. */
 export function reviewModelParams(modelId: string): Array<{ id: string; value: string }> | undefined {
   if (modelId !== "grok-4.7") return undefined;
   return [
@@ -48,6 +49,7 @@ export async function runAgentReview(
     repoDir,
     cursorApiKey,
     draftModel,
+    "draft",
     parseReviewResult,
   );
   const draft = filterDraft(drafted);
@@ -58,6 +60,7 @@ export async function runAgentReview(
       repoDir,
       cursorApiKey,
       draftModel,
+      "voice",
       parseReviewResult,
     );
     return { summary: voiced.summary, findings: [] };
@@ -72,6 +75,7 @@ export async function runAgentReview(
     repoDir,
     cursorApiKey,
     verifyModel,
+    "verify",
     parseVerifiedReviewResult,
   );
   const merged = mergeVerifiedFindings(draft, verified);
@@ -108,11 +112,28 @@ function formatModelLabel(
 
 export function agentRunFailureMessage(
   label: string,
-  result: { status: string; id: string; error?: { message: string } },
+  result: { status: string; id: string; error?: { message: string; code?: string } },
 ): string {
-  const detail = result.error?.message.trim();
+  const message = result.error?.message.trim();
+  const code = result.error?.code?.trim();
+  const detail = code ? `[${code}] ${message ?? ""}`.trim() : message;
   const base = `${label} ${result.status}: ${result.id}`;
   return detail ? `${base}: ${detail}` : base;
+}
+
+/** One log line per agent pass: server-resolved model, token usage, request id. */
+export function formatAgentRunLog(
+  label: string,
+  result: Pick<RunResult, "status" | "model" | "usage" | "requestId">,
+): string {
+  const params = result.model?.params?.map((param) => `${param.id}=${param.value}`).join(",");
+  const model = result.model?.id ? `${result.model.id}${params ? `(${params})` : ""}` : "?";
+  const usage = result.usage;
+  const tokens = usage
+    ? `in=${usage.inputTokens} out=${usage.outputTokens} cache_read=${usage.cacheReadTokens} cache_write=${usage.cacheWriteTokens} total=${usage.totalTokens}`
+    : "?";
+  const status = result.status === "finished" ? "" : ` status=${result.status}`;
+  return `  ${label}: model=${model} tokens=${tokens} request=${result.requestId ?? "?"}${status}`;
 }
 
 async function runReviewPass<T>(
@@ -120,9 +141,10 @@ async function runReviewPass<T>(
   repoDir: string,
   cursorApiKey: string,
   modelId: string,
+  label: string,
   parse: (text: string) => T,
 ): Promise<T> {
-  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId);
+  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId, label);
 
   if (result.status !== "finished") {
     throw new Error(agentRunFailureMessage("Review", result));
@@ -150,8 +172,9 @@ export async function promptLocalAgent(
   prompt: string,
   repoDir: string,
   cursorApiKey: string,
-  modelId = REVIEW_DRAFT_MODEL,
-) {
+  modelId = reviewDraftModel(),
+  label = "agent",
+): Promise<RunResult> {
   // Use the temp parent as the Cursor workspace. Repository-controlled
   // .cursor/sandbox.json then remains review data, not active sandbox policy.
   const workspaceDir = dirname(repoDir);
@@ -169,7 +192,7 @@ export async function promptLocalAgent(
   ].join("\n");
 
   const modelParams = reviewModelParams(modelId);
-  return withSanitizedAgentEnvironment(
+  const result = await withSanitizedAgentEnvironment(
     () =>
       Agent.prompt(scopedPrompt, {
         apiKey: cursorApiKey,
@@ -191,6 +214,8 @@ export async function promptLocalAgent(
       TEMP: agentTmp,
     },
   );
+  console.log(formatAgentRunLog(label, result));
+  return result;
 }
 
 /**
