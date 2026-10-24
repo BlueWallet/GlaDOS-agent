@@ -106,7 +106,7 @@ cli/notifications.ts
 
 **Awaiting:** root comment by GLaDOS, unresolved, not settled, and there is an unacknowledged human reply (anyone) after GLaDOS’s last acknowledgment.
 
-**Agent:** `runThreadReplies()` with thread history + local checkout → JSON `{ replies: [{ threadId, decision: "agree"|"disagree", body }] }` — exactly one decision per awaiting thread.
+**Agent:** `runThreadReplies()` with thread history + local checkout (draft model: `auto` / `GLADOS_REVIEW_MODEL`) → JSON `{ replies: [{ threadId, decision: "agree"|"disagree", body }] }` — exactly one decision per awaiting thread.
 
 **Actions:**
 - Agree → controlled reply (`<!-- glados:reply-to:… -->` + `<!-- glados:agree -->`) → `resolveReviewThread` when `viewerCanResolve`.
@@ -121,7 +121,7 @@ cli/notifications.ts
 
 Two agent passes, then optional settled-finding suppression:
 
-1. **Draft** (`buildReviewPrompt`, `grok-4.7` `reasoning_effort=xhigh`, `fast=true` / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
+1. **Draft** (`buildReviewPrompt`, `auto` / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the same model.
 2. **Verify** (`buildVerifyPrompt`, same default model, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Evidence is checked only for visible text, not for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass.
 
 **Severity:** `critical` = bugs, security, data loss, broken functionality. `high` = architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior. `medium`/`low` = style, optimization, docs polish.
@@ -182,7 +182,7 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 |----------|----------|
 | `GLADOS_TOKEN` | GitHub API (search, notifications, clone auth, reviews, thread reply/resolve) |
 | `CURSOR_API_KEY` | Cursor SDK local agent runs |
-| `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `grok-4.7`, `reasoning_effort=xhigh`, `fast=true`) |
-| `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `grok-4.7`, `reasoning_effort=xhigh`, `fast=true`) |
+| `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `auto`; `grok-4.7` override gets `reasoning_effort=xhigh`, `fast=true`) |
+| `GLADOS_VERIFY_MODEL` | Optional verify-pass model (default `auto`; `grok-4.7` override gets `reasoning_effort=xhigh`, `fast=true`) |
 
 `GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry.

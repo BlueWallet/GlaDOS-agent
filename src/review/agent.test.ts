@@ -45,18 +45,24 @@ test("review models default and honor env overrides", () => {
   try {
     delete process.env.GLADOS_REVIEW_MODEL;
     delete process.env.GLADOS_VERIFY_MODEL;
-    assert.equal(reviewDraftModel(), REVIEW_DRAFT_MODEL);
-    assert.deepEqual(reviewModelParams(REVIEW_DRAFT_MODEL), [
-      { id: "reasoning_effort", value: "xhigh" },
-      { id: "fast", value: "true" },
-    ]);
-    assert.equal(reviewVerifyModel(), REVIEW_VERIFY_MODEL);
+    assert.equal(REVIEW_DRAFT_MODEL, "auto");
+    assert.equal(REVIEW_VERIFY_MODEL, "auto");
+    assert.equal(reviewDraftModel(), "auto");
+    assert.equal(reviewModelParams(REVIEW_DRAFT_MODEL), undefined);
+    assert.equal(reviewVerifyModel(), "auto");
 
     process.env.GLADOS_REVIEW_MODEL = "composer-2.5-fast";
     process.env.GLADOS_VERIFY_MODEL = "claude-opus-5";
     assert.equal(reviewDraftModel(), "composer-2.5-fast");
     assert.equal(reviewModelParams("composer-2.5-fast"), undefined);
     assert.equal(reviewVerifyModel(), "claude-opus-5");
+
+    process.env.GLADOS_REVIEW_MODEL = "grok-4.7";
+    assert.equal(reviewDraftModel(), "grok-4.7");
+    assert.deepEqual(reviewModelParams("grok-4.7"), [
+      { id: "reasoning_effort", value: "xhigh" },
+      { id: "fast", value: "true" },
+    ]);
   } finally {
     restoreEnv("GLADOS_REVIEW_MODEL", oldReview);
     restoreEnv("GLADOS_VERIFY_MODEL", oldVerify);

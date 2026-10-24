@@ -12,8 +12,9 @@ import {
   undisprovenBlockers,
 } from "./payload.js";
 
-export const REVIEW_DRAFT_MODEL = "grok-4.7";
-export const REVIEW_VERIFY_MODEL = "grok-4.7";
+/** Cursor "Auto": the server picks the model, and it keeps working after plan usage runs out. */
+export const REVIEW_DRAFT_MODEL = "auto";
+export const REVIEW_VERIFY_MODEL = "auto";
 
 export function reviewDraftModel(): string {
   return process.env.GLADOS_REVIEW_MODEL || REVIEW_DRAFT_MODEL;
@@ -23,7 +24,7 @@ export function reviewVerifyModel(): string {
   return process.env.GLADOS_VERIFY_MODEL || REVIEW_VERIFY_MODEL;
 }
 
-/** Grok 4.7 standard tier at xhigh. Other models get no params. */
+/** Grok 4.7 (only via env override) runs standard tier at xhigh. Other models, including auto, get no params. */
 export function reviewModelParams(modelId: string): Array<{ id: string; value: string }> | undefined {
   if (modelId !== "grok-4.7") return undefined;
   return [
@@ -150,7 +151,7 @@ export async function promptLocalAgent(
   prompt: string,
   repoDir: string,
   cursorApiKey: string,
-  modelId = REVIEW_DRAFT_MODEL,
+  modelId = reviewDraftModel(),
 ) {
   // Use the temp parent as the Cursor workspace. Repository-controlled
   // .cursor/sandbox.json then remains review data, not active sandbox policy.
