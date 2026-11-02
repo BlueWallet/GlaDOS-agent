@@ -53,6 +53,12 @@ export interface PrContext {
   diff?: string;
 }
 
+/** How to read, not how much: shared by the draft and verify prompts. */
+export const READING_RULES = [
+  "Do not read lockfiles, generated or minified files, snapshots, or vendored third-party code unless the diff changes them in a way that matters.",
+  "Prefer search (grep) and reading line ranges over whole-file reads, especially for large files.",
+];
+
 /**
  * Pre-fetched PR facts so the agent does not spend turns discovering the base,
  * the description, or the changed files. Title/body/diff are untrusted.
@@ -135,12 +141,13 @@ export function buildReviewPrompt(
     "You are on the PR branch with full repo access.",
     "Explore the repo and the diff as needed. Read the changed code and the code it touches; do not review from the diff alone.",
     "Do NOT run tests, builds, package managers, installers, repository scripts, or executable project commands. This PR's CI pipeline runs tests; review by reading files only.",
+    ...READING_RULES,
     ...(prContext
       ? [
           "",
           prContext,
           "",
-          "Start from the facts above. Read the changed files and the code they call or are called by; skip unrelated parts of the repository. Read only the parts of a large file you need.",
+          "Start from the facts above.",
         ]
       : []),
     "",
@@ -215,7 +222,8 @@ export function buildVerifyPrompt(
     `You are verifying candidate review findings for pull request ${prUrl}.`,
     "You are on the PR branch with full repo access. Re-read the relevant code.",
     "Do NOT run tests, builds, package managers, installers, repository scripts, or executable project commands. Review by reading files only.",
-    ...(prContext ? ["", prContext, "", "Re-read only the code each candidate depends on."] : []),
+    ...READING_RULES,
+    ...(prContext ? ["", prContext] : []),
     "",
     "Each candidate may be wrong. Drop a candidate only when:",
     "- it restates a deliberate choice in the PR's stated design or intention as if it were a defect, without showing a flaw in that design",

@@ -4,6 +4,7 @@ import {
   buildReviewPrompt,
   buildVerifyPrompt,
   buildVoicePrompt,
+  READING_RULES,
   formatPrContext,
   mergeVerifiedFindings,
   parseReviewResult,
@@ -363,4 +364,16 @@ test("PR context fences untrusted fields and inlines only small diffs", () => {
   const prompt = buildReviewPrompt("https://example.test/pr/1", "", full);
   assert.match(prompt, /PR facts \(pre-fetched/);
   assert.doesNotMatch(buildReviewPrompt("https://example.test/pr/1"), /PR facts/);
+});
+
+test("draft and verify prompts carry the reading rules without dropping the checklist", () => {
+  const draftPrompt = buildReviewPrompt("https://example.test/pr/1");
+  const verifyPrompt = buildVerifyPrompt("https://example.test/pr/1", draft);
+  for (const rule of READING_RULES) {
+    assert.ok(draftPrompt.includes(rule), rule);
+    assert.ok(verifyPrompt.includes(rule), rule);
+  }
+  assert.match(draftPrompt, /lockfiles, generated or minified files, snapshots/);
+  assert.match(draftPrompt, /Check every category below/);
+  assert.match(draftPrompt, /do not review from the diff alone/);
 });
