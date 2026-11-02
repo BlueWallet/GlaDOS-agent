@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   REVIEW_DRAFT_MODEL,
   REVIEW_VERIFY_MODEL,
+  StepTally,
+  reviewDisallowedTools,
   agentRunFailureMessage,
   formatAgentRunLog,
   reviewDraftModel,
@@ -122,3 +124,26 @@ function restoreEnv(name: string, value: string | undefined): void {
     process.env[name] = value;
   }
 }
+
+test("step tally counts tool calls by type", () => {
+  const tally = new StepTally();
+  tally.add({ type: "assistantMessage", message: { text: "hi" } } as never);
+  tally.add({ type: "toolCall", message: { type: "grep" } } as never);
+  tally.add({ type: "toolCall", message: { type: "read" } } as never);
+  tally.add({ type: "toolCall", message: { type: "read" } } as never);
+  assert.equal(tally.format(), "steps=4 tool_calls=3 (read=2 grep=1)");
+});
+
+test("review disallows write tools and accepts env additions", () => {
+  const old = process.env.GLADOS_DISALLOW_TOOLS;
+  try {
+    process.env.GLADOS_DISALLOW_TOOLS = "task, webFetch,edit";
+    const tools = reviewDisallowedTools();
+    for (const name of ["edit", "delete", "webSearch", "task", "webFetch"]) {
+      assert.ok(tools.includes(name), name);
+    }
+    assert.equal(tools.filter((name) => name === "edit").length, 1);
+  } finally {
+    restoreEnv("GLADOS_DISALLOW_TOOLS", old);
+  }
+});

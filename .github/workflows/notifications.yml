@@ -8,7 +8,10 @@ on:
 
 concurrency:
   group: notifications
-  cancel-in-progress: true
+  # Never kill a review mid-flight: a cancelled run throws away all its tokens and
+  # the next run starts the same PR from scratch. GitHub keeps at most one pending
+  # run per group, so queued wake-ups still collapse.
+  cancel-in-progress: false
 
 jobs:
   notifications:
@@ -22,7 +25,7 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Review pending PRs
         env:

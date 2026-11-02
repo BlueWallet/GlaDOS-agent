@@ -1,3 +1,4 @@
+import { tryLoadPrContext } from "../github/pr-context.js";
 import { CursorAgentError } from "@cursor/sdk";
 import { withPrLock, withPrWorkspace } from "../git/workspace.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
@@ -31,10 +32,14 @@ export async function processPrReview(
         options.githubToken,
         async (repoDir) => {
           console.log(`  Reviewing ${pr.prUrl} ...`);
+          const prContext = await tryLoadPrContext(options.githubToken, pr, repoDir);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
+            "",
+            undefined,
+            prContext,
           );
           const review = buildGithubReview(payload);
           console.log(`  Verdict: ${review.event}`);
