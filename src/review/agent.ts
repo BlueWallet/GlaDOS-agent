@@ -1,4 +1,12 @@
-import { Agent, type ConversationStep, type RunResult, type ToolName } from "@cursor/sdk";
+import {
+  Agent,
+  AuthenticationError,
+  ConfigurationError,
+  RateLimitError,
+  type ConversationStep,
+  type RunResult,
+  type ToolName,
+} from "@cursor/sdk";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -80,13 +88,15 @@ export async function runAgentReview(
   const draft = filterDraft(drafted);
   if (draft.findings.length === 0) {
     console.log(`  Voice review (${draftLabel})...`);
-    const voiced = await runReviewPass(
-      buildVoicePrompt(prUrl, draft),
-      repoDir,
-      cursorApiKey,
-      draftModel,
-      "voice",
-      parseReviewResult,
+    const voiced = await retrySecondPass("voice", () =>
+      runReviewPass(
+        buildVoicePrompt(prUrl, draft),
+        repoDir,
+        cursorApiKey,
+        draftModel,
+        "voice",
+        parseReviewResult,
+      ),
     );
     return { summary: voiced.summary, findings: [] };
   }
@@ -95,18 +105,20 @@ export async function runAgentReview(
   const verifyParams = reviewModelParams(verifyModel);
   const verifyLabel = formatModelLabel(verifyModel, verifyParams);
   console.log(`  Verify review (${verifyLabel}, ${draft.findings.length} candidate(s))...`);
-  const verified = await runReviewPass(
-    buildVerifyPrompt(
-      prUrl,
-      draft,
-      extraContext,
-      formatPrContext(prContext, { includeDiff: false }),
+  const verified = await retrySecondPass("verify", () =>
+    runReviewPass(
+      buildVerifyPrompt(
+        prUrl,
+        draft,
+        extraContext,
+        formatPrContext(prContext, { includeDiff: false }),
+      ),
+      repoDir,
+      cursorApiKey,
+      verifyModel,
+      "verify",
+      parseVerifiedReviewResult,
     ),
-    repoDir,
-    cursorApiKey,
-    verifyModel,
-    "verify",
-    parseVerifiedReviewResult,
   );
   const merged = mergeVerifiedFindings(draft, verified);
   const dropped = draft.findings.length - merged.findings.length;
@@ -124,6 +136,47 @@ export async function runAgentReview(
     console.log(`  Restored ${restored} blocker(s) dropped without evidence`);
   }
   return merged;
+}
+
+/** Retries after a failed voice/verify pass: short waits, then give up. */
+export const SECOND_PASS_RETRY_DELAYS_MS = [15_000, 45_000];
+
+/**
+ * Usage limits, auth, and bad config will fail the same way again; everything
+ * else (run errors such as "resume attempts made no progress", network blips,
+ * empty or unparsable output) is worth another try.
+ */
+export function isRetryableSecondPassError(err: unknown): boolean {
+  if (err instanceof RateLimitError) return false;
+  if (err instanceof AuthenticationError) return false;
+  if (err instanceof ConfigurationError) return false;
+  const message = err instanceof Error ? err.message : String(err);
+  return !/usage limit/i.test(message);
+}
+
+/**
+ * Re-run only the second pass. The caller's closure captures the in-memory
+ * draft, so the expensive draft pass is never repeated.
+ */
+export async function retrySecondPass<T>(
+  label: string,
+  run: () => Promise<T>,
+  delaysMs: readonly number[] = SECOND_PASS_RETRY_DELAYS_MS,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      const delay = delaysMs[attempt];
+      if (delay === undefined || !isRetryableSecondPassError(err)) throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(
+        `  ${label} pass failed (${reason}); retry ${attempt + 1}/${delaysMs.length} in ${Math.round(delay / 1000)}s, keeping the draft`,
+      );
+      await sleep(delay);
+    }
+  }
 }
 
 /** Model-generated text on one line: control chars escaped, format chars removed. */
