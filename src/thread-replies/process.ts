@@ -1,3 +1,4 @@
+import { tryLoadPrContext } from "../github/pr-context.js";
 import { CursorAgentError } from "@cursor/sdk";
 import { withPrLock, withPrWorkspace } from "../git/workspace.js";
 import {
@@ -81,6 +82,7 @@ export async function processPrReviewWithThreadReplies(
             options.cursorApiKey,
             settledContext,
             (draft) => suppressSettledFindings(draft, threadResult.settled),
+            await tryLoadPrContext(options.githubToken, pr, repoDir),
           );
           const filtered = suppressSettledFindings(
             payload,
