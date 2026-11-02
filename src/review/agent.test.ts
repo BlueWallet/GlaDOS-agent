@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { RateLimitError } from "@cursor/sdk";
 import {
   REVIEW_DRAFT_MODEL,
   REVIEW_VERIFY_MODEL,
   StepTally,
+  isRetryableSecondPassError,
+  retrySecondPass,
   reviewDisallowedTools,
   agentRunFailureMessage,
   formatAgentRunLog,
@@ -146,4 +149,63 @@ test("review disallows write tools and accepts env additions", () => {
   } finally {
     restoreEnv("GLADOS_DISALLOW_TOOLS", old);
   }
+});
+
+const USAGE_LIMIT =
+  "Review error: run-x: You've hit your usage limit You've saved $3126 on API model usage this month with Ultra.";
+
+function quietRetry<T>(run: () => Promise<T>, delays: number[] = [1, 2]) {
+  const waits: number[] = [];
+  const originalError = console.error;
+  console.error = () => {};
+  const promise = retrySecondPass("verify", run, delays, async (ms) => {
+    waits.push(ms);
+  }).finally(() => {
+    console.error = originalError;
+  });
+  return { promise, waits };
+}
+
+test("second pass retries a transient failure and keeps the result", async () => {
+  let calls = 0;
+  const { promise, waits } = quietRetry(async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw new Error("Review error: run-1: Agent turn stopped after repeated resume attempts made no progress");
+    }
+    return "verified";
+  });
+  assert.equal(await promise, "verified");
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [1]);
+});
+
+test("second pass does not retry the usage limit", async () => {
+  for (const err of [new Error(USAGE_LIMIT), new RateLimitError("Too many requests")]) {
+    let calls = 0;
+    const { promise, waits } = quietRetry(async () => {
+      calls += 1;
+      throw err;
+    });
+    await assert.rejects(promise, err);
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  }
+});
+
+test("second pass gives up after the bounded retries", async () => {
+  let calls = 0;
+  const { promise, waits } = quietRetry(async () => {
+    calls += 1;
+    throw new Error(`attempt ${calls}`);
+  });
+  await assert.rejects(promise, /attempt 3/);
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [1, 2]);
+});
+
+test("retryable classification", () => {
+  assert.equal(isRetryableSecondPassError(new Error("Agent returned empty review")), true);
+  assert.equal(isRetryableSecondPassError(new SyntaxError("Unexpected token")), true);
+  assert.equal(isRetryableSecondPassError(new Error(USAGE_LIMIT)), false);
 });
