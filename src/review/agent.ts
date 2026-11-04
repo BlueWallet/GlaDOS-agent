@@ -24,8 +24,9 @@ import {
 
 /**
  * Tools a read-only review never needs. Removing them shrinks the tool schema
- * sent every turn and blocks wasted turns (web search, file edits, images).
- * GLADOS_DISALLOW_TOOLS (comma-separated, e.g. "task,webFetch") adds more for A/B runs.
+ * sent every turn and blocks wasted turns (web search, file edits, images,
+ * and task subagents that re-explore the repo and burn tokens).
+ * GLADOS_DISALLOW_TOOLS (comma-separated, e.g. "webFetch") adds more for A/B runs.
  */
 export const REVIEW_DISALLOWED_TOOLS: ToolName[] = [
   "edit",
@@ -34,6 +35,7 @@ export const REVIEW_DISALLOWED_TOOLS: ToolName[] = [
   "generateImage",
   "webSearch",
   "askQuestion",
+  "task",
 ];
 
 export function reviewDisallowedTools(): ToolName[] {

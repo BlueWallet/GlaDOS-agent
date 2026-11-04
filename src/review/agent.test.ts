@@ -140,7 +140,13 @@ test("step tally counts tool calls by type", () => {
 test("review disallows write tools and accepts env additions", () => {
   const old = process.env.GLADOS_DISALLOW_TOOLS;
   try {
-    process.env.GLADOS_DISALLOW_TOOLS = "task, webFetch,edit";
+    delete process.env.GLADOS_DISALLOW_TOOLS;
+    assert.ok(
+      reviewDisallowedTools().includes("task"),
+      "task must be banned by default",
+    );
+
+    process.env.GLADOS_DISALLOW_TOOLS = "webFetch,edit";
     const tools = reviewDisallowedTools();
     for (const name of ["edit", "delete", "webSearch", "task", "webFetch"]) {
       assert.ok(tools.includes(name), name);
