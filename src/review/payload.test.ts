@@ -363,7 +363,10 @@ test("PR context fences untrusted fields and inlines only small diffs", () => {
 
   const prompt = buildReviewPrompt("https://example.test/pr/1", "", full);
   assert.match(prompt, /PR facts \(pre-fetched/);
-  assert.doesNotMatch(buildReviewPrompt("https://example.test/pr/1"), /PR facts/);
+  assert.doesNotMatch(
+    buildReviewPrompt("https://example.test/pr/1"),
+    /PR facts \(pre-fetched/,
+  );
 });
 
 test("draft and verify prompts carry the reading rules without dropping the checklist", () => {
@@ -374,6 +377,13 @@ test("draft and verify prompts carry the reading rules without dropping the chec
     assert.ok(verifyPrompt.includes(rule), rule);
   }
   assert.match(draftPrompt, /lockfiles, generated or minified files, snapshots/);
+  assert.match(draftPrompt, /Trust pre-fetched PR facts/);
+  assert.match(draftPrompt, /one changed path at a time/);
   assert.match(draftPrompt, /Check every category below/);
   assert.match(draftPrompt, /do not review from the diff alone/);
+  assert.match(draftPrompt, /Report every critical and high issue/);
+  assert.doesNotMatch(
+    draftPrompt,
+    /If the diff is too large for one pass, review it in several passes yourself/,
+  );
 });

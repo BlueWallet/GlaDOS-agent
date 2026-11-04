@@ -57,6 +57,8 @@ export interface PrContext {
 export const READING_RULES = [
   "Do not read lockfiles, generated or minified files, snapshots, or vendored third-party code unless the diff changes them in a way that matters.",
   "Prefer search (grep) and reading line ranges over whole-file reads, especially for large files.",
+  "Trust pre-fetched PR facts; do not re-derive base, changed-file list, or title/body via git or search.",
+  "For large diffs, use `git diff … -- <path>` one changed path at a time; do not dump the full diff or walk unrelated trees.",
 ];
 
 /**
@@ -182,7 +184,6 @@ export function buildReviewPrompt(
     "- Report every critical and high issue you find. Never omit or downgrade one to keep the review short or polite.",
     "- Categorize by actual severity. Do not mark nitpicks as critical or high.",
     "- Return an empty findings array only after you have checked every category above and found nothing.",
-    "- If the diff is too large for one pass, review it in several passes yourself.",
     "- Do not give feedback on code you did not read.",
     "- Before reporting a control-flow or error-handling issue, read the called functions and their callers. Report what actually throws, returns, or is swallowed.",
     "- A deliberate choice in the PR's stated design or intention is not a bug by itself. A flaw in that design is a finding; say so.",
