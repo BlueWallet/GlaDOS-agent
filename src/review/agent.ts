@@ -46,9 +46,11 @@ export function reviewDisallowedTools(): ToolName[] {
   return [...new Set([...REVIEW_DISALLOWED_TOOLS, ...extra])];
 }
 
-/** Cursor "Auto": the server picks the model, and it keeps working after plan usage runs out. */
-export const REVIEW_DRAFT_MODEL = "auto";
-export const REVIEW_VERIFY_MODEL = "auto";
+/** Draft is cheap and shallow. Verify and voice spend the high-effort pass. */
+export const REVIEW_DRAFT_MODEL = "grok-4.7";
+export const REVIEW_VERIFY_MODEL = "grok-4.7";
+
+export type ReviewReasoningEffort = "low" | "xhigh";
 
 export function reviewDraftModel(): string {
   return process.env.GLADOS_REVIEW_MODEL || REVIEW_DRAFT_MODEL;
@@ -58,12 +60,15 @@ export function reviewVerifyModel(): string {
   return process.env.GLADOS_VERIFY_MODEL || REVIEW_VERIFY_MODEL;
 }
 
-/** Grok 4.7 (only via env override) runs standard tier at xhigh. Other models, including auto, get no params. */
-export function reviewModelParams(modelId: string): Array<{ id: string; value: string }> | undefined {
+/** Grok 4.7 runs non-fast. Other model ids get no params. */
+export function reviewModelParams(
+  modelId: string,
+  effort: ReviewReasoningEffort = "low",
+): Array<{ id: string; value: string }> | undefined {
   if (modelId !== "grok-4.7") return undefined;
   return [
-    { id: "reasoning_effort", value: "xhigh" },
-    { id: "fast", value: "true" },
+    { id: "reasoning_effort", value: effort },
+    { id: "fast", value: "false" },
   ];
 }
 
@@ -76,7 +81,7 @@ export async function runAgentReview(
   prContext?: PrContext,
 ): Promise<ReviewPayload> {
   const draftModel = reviewDraftModel();
-  const draftParams = reviewModelParams(draftModel);
+  const draftParams = reviewModelParams(draftModel, "low");
   const draftLabel = formatModelLabel(draftModel, draftParams);
   console.log(`  Draft review (${draftLabel})...`);
   const drafted = await runReviewPass(
@@ -86,25 +91,29 @@ export async function runAgentReview(
     draftModel,
     "draft",
     parseReviewResult,
+    "low",
   );
   const draft = filterDraft(drafted);
   if (draft.findings.length === 0) {
-    console.log(`  Voice review (${draftLabel})...`);
+    const voiceModel = reviewVerifyModel();
+    const voiceParams = reviewModelParams(voiceModel, "xhigh");
+    console.log(`  Voice review (${formatModelLabel(voiceModel, voiceParams)})...`);
     const voiced = await retrySecondPass("voice", () =>
       runReviewPass(
         buildVoicePrompt(prUrl, draft),
         repoDir,
         cursorApiKey,
-        draftModel,
+        voiceModel,
         "voice",
         parseReviewResult,
+        "xhigh",
       ),
     );
     return { summary: voiced.summary, findings: [] };
   }
 
   const verifyModel = reviewVerifyModel();
-  const verifyParams = reviewModelParams(verifyModel);
+  const verifyParams = reviewModelParams(verifyModel, "xhigh");
   const verifyLabel = formatModelLabel(verifyModel, verifyParams);
   console.log(`  Verify review (${verifyLabel}, ${draft.findings.length} candidate(s))...`);
   const verified = await retrySecondPass("verify", () =>
@@ -120,6 +129,7 @@ export async function runAgentReview(
       verifyModel,
       "verify",
       parseVerifiedReviewResult,
+      "xhigh",
     ),
   );
   const merged = mergeVerifiedFindings(draft, verified);
@@ -228,8 +238,9 @@ async function runReviewPass<T>(
   modelId: string,
   label: string,
   parse: (text: string) => T,
+  effort: ReviewReasoningEffort,
 ): Promise<T> {
-  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId, label);
+  const result = await promptLocalAgent(prompt, repoDir, cursorApiKey, modelId, label, effort);
 
   if (result.status !== "finished") {
     throw new Error(agentRunFailureMessage("Review", result));
@@ -259,6 +270,7 @@ export async function promptLocalAgent(
   cursorApiKey: string,
   modelId = reviewDraftModel(),
   label = "agent",
+  effort: ReviewReasoningEffort = "low",
 ): Promise<RunResult> {
   // Use the temp parent as the Cursor workspace. Repository-controlled
   // .cursor/sandbox.json then remains review data, not active sandbox policy.
@@ -276,7 +288,7 @@ export async function promptLocalAgent(
     prompt,
   ].join("\n");
 
-  const modelParams = reviewModelParams(modelId);
+  const modelParams = reviewModelParams(modelId, effort);
   const tally = new StepTally();
   const result = await withSanitizedAgentEnvironment(
     async () => {
