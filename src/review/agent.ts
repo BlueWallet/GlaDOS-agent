@@ -46,7 +46,7 @@ export function reviewDisallowedTools(): ToolName[] {
   return [...new Set([...REVIEW_DISALLOWED_TOOLS, ...extra])];
 }
 
-/** Draft is cheap and shallow. Verify and voice spend the high-effort pass. */
+/** Draft, verify, and voice all use the high-effort pass. */
 export const REVIEW_DRAFT_MODEL = "grok-4.7";
 export const REVIEW_VERIFY_MODEL = "grok-4.7";
 
@@ -81,7 +81,7 @@ export async function runAgentReview(
   prContext?: PrContext,
 ): Promise<ReviewPayload> {
   const draftModel = reviewDraftModel();
-  const draftParams = reviewModelParams(draftModel, "low");
+  const draftParams = reviewModelParams(draftModel, "xhigh");
   const draftLabel = formatModelLabel(draftModel, draftParams);
   console.log(`  Draft review (${draftLabel})...`);
   const drafted = await runReviewPass(
@@ -91,7 +91,7 @@ export async function runAgentReview(
     draftModel,
     "draft",
     parseReviewResult,
-    "low",
+    "xhigh",
   );
   const draft = filterDraft(drafted);
   if (draft.findings.length === 0) {
