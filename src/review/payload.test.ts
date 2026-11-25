@@ -102,11 +102,8 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /Avoid bland phrases/i);
   assert.match(prompt, /high \(blocking\): .*wrong money/i);
   assert.match(prompt, /wrong error message .* is low/i);
-  assert.match(prompt, /deliberately reuses an existing code path/i);
-  assert.match(prompt, /out of scope for the PR's stated goal/i);
-  assert.match(prompt, /only with concrete disproof from code you read, or from the PR's stated goal/i);
   assert.doesNotMatch(prompt, /test gaps for changed behavior are valid high/i);
-  assert.doesNotMatch(prompt, /did not worsen or depend on/i);
+  assert.match(prompt, /did not worsen or depend on/i);
 });
 
 test("voice prompt rewrites a clean draft without reopening the review", () => {
@@ -159,17 +156,30 @@ test("mergeVerifiedFindings keeps a blocker's severity when lowered without evid
   }
 });
 
-test("verify prompt lets a message-only blocker drop to low with the message as evidence", () => {
+test("verify cannot drop or demote a blocker on scope, reuse, or wording", () => {
   const prompt = buildVerifyPrompt("https://example.test/pr/1", draft);
-  assert.match(prompt, /only impact is user-facing text, wording, or docs, lower it to low/i);
-  assert.doesNotMatch(prompt, /messageOnly/);
-  const merged = mergeVerifiedFindings(draft, {
+  assert.doesNotMatch(prompt, /deliberately reuses/);
+  assert.doesNotMatch(prompt, /out of scope/i);
+  assert.doesNotMatch(prompt, /from the PR's stated goal/);
+  assert.doesNotMatch(prompt, /only impact is user-facing text/);
+  assert.match(prompt, /concrete disproof from code you read\. If in doubt/);
+});
+
+test("blocker evidence must cite code, not just say something", () => {
+  const lowered = mergeVerifiedFindings(draft, {
     summary: "Only the wording is wrong.",
     findings: [
       { candidate: 0, severity: "low", body: "Wrong error text.", evidence: "message-only: the rejection text says not a PSBT" },
     ],
   });
-  assert.equal(merged.findings[0]?.severity, "low");
+  assert.equal(lowered.findings[0]?.severity, "high");
+
+  const dropped = mergeVerifiedFindings(draft, {
+    summary: "Out of scope.",
+    findings: [],
+    dropped: [{ candidate: 0, evidence: "out of scope per the PR description" }],
+  });
+  assert.equal(dropped.findings[0]?.severity, "high");
 });
 
 test("mergeVerifiedFindings will not raise severity above the draft", () => {

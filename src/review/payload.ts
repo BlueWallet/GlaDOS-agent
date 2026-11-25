@@ -246,23 +246,19 @@ export function buildVerifyPrompt(
     "",
     "Each candidate may be wrong. Drop a candidate only when:",
     "- it restates a deliberate choice in the PR's stated design or intention as if it were a defect, without showing a flaw in that design",
-    "- it describes pre-existing behavior this diff did not worsen, or behavior of an existing path the PR deliberately reuses",
-    "- it is out of scope for the PR's stated goal",
+    "- it describes pre-existing behavior this diff did not worsen or depend on",
     "- the claimed throw, return, or error path is false after reading the called functions",
     "- it is medium or low and is only speculation or a matter of taste",
     ...(extraContext
       ? ["- the additional context below rules it out; cite that context as evidence"]
       : []),
     "",
-    ...SCOPE_RULES,
-    "",
     ...SEVERITY_RUBRIC,
     "",
     "Critical and high candidates are blockers. Judge their severity by the rubric above.",
-    "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read, or from the PR's stated goal when it is out of scope or pre-existing. If in doubt, keep it at its draft severity.",
+    "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
     "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
     "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
-    "When a kept finding's only impact is user-facing text, wording, or docs, lower it to low; its \"evidence\" is the message it affects, no code disproof needed.",
     "A candidate is either kept in \"findings\" or listed in \"dropped\", never both.",
     "",
     "You may lower severity. Do not raise severity. Do not add findings that were not in the candidate list.",
@@ -318,9 +314,9 @@ function capSeverity(draft: Severity, verified: Severity): Severity {
   return SEVERITY_RANK[verified] > SEVERITY_RANK[draft] ? draft : verified;
 }
 
-/** Evidence must carry visible text; blank or control/format-only strings do not count. */
+/** Blocker evidence must cite a file it read, e.g. `src/storage.ts`; prose alone does not count. */
 function hasEvidence(evidence: string | undefined): boolean {
-  return /[\p{L}\p{N}]/u.test(evidence ?? "");
+  return /[\w/-]{2,}\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(evidence ?? "");
 }
 
 /**
