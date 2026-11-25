@@ -6,6 +6,8 @@ export interface ReviewThreadComment {
   id: string;
   body: string;
   authorLogin: string;
+  /** GitHub App / bot account (GraphQL logins omit the `[bot]` suffix). */
+  authorIsBot: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,6 +19,10 @@ export interface ReviewThread {
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
+  /** Login of whoever resolved the thread; null while unresolved. */
+  resolvedByLogin: string | null;
+  /** The schema types resolvedBy as User; checked anyway so a bot actor never settles a thread. */
+  resolvedByIsBot: boolean;
   comments: ReviewThreadComment[];
 }
 
@@ -32,7 +38,7 @@ interface GqlComment {
   body: string;
   createdAt: string;
   updatedAt: string;
-  author: { login: string } | null;
+  author: { login: string; __typename?: string } | null;
 }
 
 interface GqlThread {
@@ -41,6 +47,7 @@ interface GqlThread {
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
+  resolvedBy: { __typename?: string; login: string } | null;
   comments: {
     pageInfo: PageInfo;
     nodes: GqlComment[];
@@ -88,6 +95,7 @@ export async function listReviewThreads(
                 viewerCanResolve
                 path
                 line
+                resolvedBy { __typename login }
                 comments(first: 50) {
                   pageInfo { hasNextPage endCursor }
                   nodes {
@@ -95,7 +103,7 @@ export async function listReviewThreads(
                     body
                     createdAt
                     updatedAt
-                    author { login }
+                    author { __typename login }
                   }
                 }
               }
@@ -144,6 +152,7 @@ export async function getReviewThread(
           viewerCanResolve
           path
           line
+          resolvedBy { __typename login }
           comments(first: 50) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -151,7 +160,7 @@ export async function getReviewThread(
               body
               createdAt
               updatedAt
-              author { login }
+              author { __typename login }
             }
           }
         }
@@ -172,6 +181,8 @@ async function materializeThread(
     viewerCanResolve: node.viewerCanResolve,
     path: node.path,
     line: node.line,
+    resolvedByLogin: node.resolvedBy?.login ?? null,
+    resolvedByIsBot: node.resolvedBy?.__typename === "Bot",
     comments: await loadAllComments(octokit, node),
   };
 }
@@ -204,7 +215,7 @@ async function loadAllComments(
                 body
                 createdAt
                 updatedAt
-                author { login }
+                author { __typename login }
               }
             }
           }
@@ -243,6 +254,7 @@ function mapComments(nodes: GqlComment[]): ReviewThreadComment[] {
       id: node.id,
       body: node.body,
       authorLogin: node.author?.login ?? "",
+      authorIsBot: node.author?.__typename === "Bot",
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
     };

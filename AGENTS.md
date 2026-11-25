@@ -3,7 +3,7 @@
 GLaDOS reviews open PRs with a pending review request for the authenticated user, and replies when humans respond on its review-comment threads.
 
 1. **Full review:** GitHub Search finds `review-requested:@me` PRs → clone → Cursor SDK local agent → post summary + inline comments (`APPROVE` or `REQUEST_CHANGES`).
-2. **Thread replies (optional feature):** On every PR notification wake-up (and before each full review) → inspect GLaDOS review threads → agree (reply + resolve) or disagree (reply, leave open). Settled agreements are never re-raised on later reviews of that PR.
+2. **Thread replies (optional feature):** On every PR notification wake-up (and before each full review) → inspect GLaDOS review threads → agree (reply + resolve) or disagree (reply, leave open). Settled findings (GLaDOS agreed, or the PR author / a write-access user resolved the thread) are never re-raised on later reviews of that PR.
 
 TypeScript, ESM (`"type": "module"`), Node ≥ 22.13. Run scripts with `tsx`.
 
@@ -43,6 +43,8 @@ src/
     notifications.ts    # listNotifications(), markNotificationDone()
     pr.ts               # search review-requested PRs, pending-reviewer check, notification → PR ref
     diff.ts             # getCommentableLines() — RIGHT-side lines that accept comments
+    comments.ts         # listIssueComments()
+    permissions.ts      # isWriteAccess(), loadTrustedLogins() — who counts as the owner
     reviews.ts          # postGithubReview() — validate vs diff, then createReview
     threads.ts          # GraphQL: list/get review threads, reply, resolve (thread-replies I/O)
 
@@ -55,7 +57,8 @@ src/
     index.ts            # public API only (import from here outside the folder)
     process.ts          # Phase A + compose with full review
     agent.ts            # runThreadReplies()
-    logic.ts            # classification, markers, suppress, Phase A prompt/parse
+    logic.ts            # classification, markers, settled findings, topic suppress, Phase A prompt/parse
+    memory.ts           # owner decisions: selection, bounds; review-memory context
 ```
 
 Co-located `*.test.ts` files use Node’s built-in test runner (`npm test`).
@@ -87,7 +90,8 @@ cli/notifications.ts
        thread-replies.processPrReviewWithThreadReplies()
          → withPrLock + withPrWorkspace
          → Phase A (processReviewThreads)
-         → review/agent.runAgentReview(+ settled context)
+         → review memory: threads re-read, issue comments, permission lookups → trusted logins (write access only)
+         → review/agent.runAgentReview(+ settled context, owner decisions)
          → suppressSettledFindings + sanitize markers
          → payload.buildGithubReview → reviews.postGithubReview
   → per PullRequest notification (wake-up only; GitHub coalesces PR activity):
@@ -122,11 +126,18 @@ cli/notifications.ts
 Two agent passes, then optional settled-finding suppression:
 
 1. **Draft** (`buildReviewPrompt`, `grok-4.7` xhigh non-fast / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the verify model.
-2. **Verify** (`buildVerifyPrompt`, `grok-4.7` xhigh non-fast, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Evidence is checked only for visible text, not for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass. Voice uses this model too.
+2. **Verify** (`buildVerifyPrompt`, `grok-4.7` xhigh non-fast, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Blocker evidence must cite a file (e.g. `src/storage.ts`); it is not checked for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass. Voice uses this model too.
 
-**Severity:** `critical` = bugs, security, data loss, broken functionality. `high` = architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior. `medium`/`low` = style, optimization, docs polish.
+**Severity** (`SEVERITY_RUBRIC`, impact based, shared by draft and verify): `critical` = security, loss of funds, data loss, broken core functionality. `high` (blocking) = wrong money/amount or signature handling, data loss, or a crash/hang on a path users can actually hit. `medium` = a real bug on an unlikely path, or changed behavior without a test. `low` = error messages, wording, docs, style. Calibration examples live in the rubric. No escalation: a concern from an earlier round keeps its severity unless the code there got worse.
 
-When composed with thread replies, settled findings (original body + agreement reason) are injected as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`. Exact repeats are suppressed before verification and again before posting. Open/disagreed threads do **not** suppress new findings.
+**Scope** (`SCOPE_RULES`, draft only): the PR is judged against its stated goal/spec (title, body, spec docs in the diff). Matching the current behavior of an existing path the PR deliberately reuses is correct. Out-of-scope and pre-existing issues are dropped entirely — not findings, not follow-ups. Verify does not get these rules: it may drop or demote a blocker only with code disproof.
+
+**Review memory** (composed with thread replies, `thread-replies/memory.ts`): before each full review GLaDOS loads the review threads (re-read after Phase A, so unresolves and late replies count; this run's agreements are kept), conversation comments, and permissions (`getCollaboratorPermissionLevel`; `admin`/`write` permission or `admin`/`maintain`/`write` role; GLaDOS and bots never count, including a `Bot` resolver by `__typename`; failed lookups are untrusted). It injects as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`:
+- settled findings (original body + why: GLaDOS agreement — any later human reply reopens it: GLaDOS answers it in Phase A and it is neither settled nor suppressed — or the resolver's latest reply on a thread resolved by a trusted user — every other trusted reply there, the resolver's earlier ones included, stays an owner decision; 600 chars per text, 16,000 total, oldest first, newest kept; encoded JSON inside `BEGIN/END_UNTRUSTED_SETTLED_FINDINGS`);
+- open findings: GLaDOS's unsettled root comments (severity tag included), 600 chars each, 8,000 total, encoded JSON inside `BEGIN/END_UNTRUSTED_OPEN_FINDINGS` — context for the no-escalation rule only, never suppressed;
+- owner decisions: conversation comments and thread replies by trusted humans (on agreed threads too; only a resolver's reply on a thread they resolved is left out, as it is the settle reason), newest kept, 1,500 chars each, 12,000 total, encoded JSON inside `BEGIN/END_UNTRUSTED_OWNER_DECISIONS` — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm.
+
+Settled repeats are suppressed on the draft only (verify cannot add findings): same path and exact text, or the same code topic — the finding names ≥ 2 identifiers (fenced blocks and ubiquitous tokens like `null`/`error` ignored), all already in the settled text, covering ≥ half of it. An emptied draft gets an explicit "repeated a settled issue" summary, posted as is (no voice pass). Open/disagreed threads do **not** suppress new findings. If memory cannot load, the review falls back to agreements only.
 
 **Approve vs request changes:** `critical` or `high` → `REQUEST_CHANGES`; else `APPROVE`.
 
@@ -157,6 +168,8 @@ When composed with thread replies, settled findings (original body + agreement r
 | Severity levels | `review/payload.ts` → `SEVERITIES` + `Severity` |
 | GLaDOS voice | `review/payload.ts` → `buildVerifyPrompt()`; `applyPersonality()` still wraps at post time |
 | Thread reply prompt / classification / suppress | `thread-replies/logic.ts` |
+| Owner decisions / memory bounds | `thread-replies/memory.ts` |
+| Severity rubric / scope rule | `review/payload.ts` → `SEVERITY_RUBRIC` / `SCOPE_RULES` |
 | Phase A + compose with review | `thread-replies/process.ts` |
 | Core review wiring | `review/process.ts` (no business logic) |
 | Clone / lock / cleanup | `git/workspace.ts` |
@@ -185,4 +198,4 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 | `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `grok-4.7` with `reasoning_effort=xhigh`, `fast=false`) |
 | `GLADOS_VERIFY_MODEL` | Optional verify and voice model (default `grok-4.7` with `reasoning_effort=xhigh`, `fast=false`) |
 
-`GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry.
+`GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry. Review memory reads collaborator permissions; if GitHub refuses that lookup, those users count as untrusted. Being the PR author alone never makes a login trusted.

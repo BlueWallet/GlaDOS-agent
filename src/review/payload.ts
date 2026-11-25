@@ -61,6 +61,25 @@ export const READING_RULES = [
   "For large diffs, use `git diff … -- <path>` one changed path at a time; do not dump the full diff or walk unrelated trees.",
 ];
 
+/** Impact-based severity, shared by the draft and verify prompts. */
+export const SEVERITY_RUBRIC = [
+  "Severity is about impact on users:",
+  "- critical: security issues, loss of funds, data loss, broken core functionality.",
+  "- high (blocking): wrong money or amount handling, wrong signature handling, data loss, or a crash or hang on a path users can actually hit.",
+  "- medium: a real bug on an unlikely path, or changed behavior without a test.",
+  "- low: error messages, wording, docs, style.",
+  "Calibration: a wrong error message when a parser rejects input is low. Accepting a signature that does not commit to the outputs is high. A missing test for a new branch is medium. A crash reachable only with a hand-crafted input the app never produces is medium.",
+  "Do not raise the severity of a concern raised in an earlier round unless the code there got worse.",
+];
+
+/** What the PR is judged against, shared by the draft and verify prompts. */
+export const SCOPE_RULES = [
+  "Scope:",
+  "- Judge the change against its stated goal and spec: the PR title, description, and any spec or design docs this diff adds or changes.",
+  "- When the PR deliberately reuses an existing code path, matching that path's current behavior is correct. Do not report the reused path's existing behavior.",
+  "- Out-of-scope issues and pre-existing issues (in unchanged code, or in existing behavior the PR merely reuses) are dropped entirely: report them not as findings and not as follow-ups.",
+];
+
 /**
  * Pre-fetched PR facts so the agent does not spend turns discovering the base,
  * the description, or the changed files. Title/body/diff are untrusted.
@@ -175,10 +194,9 @@ export function buildReviewPrompt(
     "- Migration strategy if stored data or schema changed? Backward compatibility?",
     "- Obvious bugs?",
     "",
-    "Severity:",
-    "- critical: bugs, security issues, data loss risks, broken functionality.",
-    "- high: architecture problems, missing functionality, poor error handling, unhandled edge cases, test gaps for changed behavior.",
-    "- medium or low: code style, optimization opportunities, documentation polish.",
+    ...SCOPE_RULES,
+    "",
+    ...SEVERITY_RUBRIC,
     "",
     "Rules:",
     "- Report every critical and high issue you find. Never omit or downgrade one to keep the review short or polite.",
@@ -187,7 +205,7 @@ export function buildReviewPrompt(
     "- Do not give feedback on code you did not read.",
     "- Before reporting a control-flow or error-handling issue, read the called functions and their callers. Report what actually throws, returns, or is swallowed.",
     "- A deliberate choice in the PR's stated design or intention is not a bug by itself. A flaw in that design is a finding; say so.",
-    "- Do not report pre-existing behavior unless this diff makes it worse or depends on it.",
+    "- Do not report pre-existing behavior unless this diff makes it worse.",
     "- If CONTRIBUTING.md exists, check that changes and commits follow it.",
     "- Be specific. Each finding body states what is wrong, why it matters, and how to fix it if not obvious.",
     "- Include path and line on this branch whenever you can anchor a comment.",
@@ -232,10 +250,12 @@ export function buildVerifyPrompt(
     "- the claimed throw, return, or error path is false after reading the called functions",
     "- it is medium or low and is only speculation or a matter of taste",
     ...(extraContext
-      ? ["- the additional context below rules it out; cite that context as evidence"]
+      ? ["- the additional context below rules it out; cite that context and the candidate's file as evidence"]
       : []),
     "",
-    "Critical and high candidates are blockers. Architecture problems, poor error handling, unhandled edge cases, and test gaps for changed behavior are valid high findings; do not drop them for not being a traced crash.",
+    ...SEVERITY_RUBRIC,
+    "",
+    "Critical and high candidates are blockers. Judge their severity by the rubric above.",
     "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
     "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
     "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
@@ -294,9 +314,9 @@ function capSeverity(draft: Severity, verified: Severity): Severity {
   return SEVERITY_RANK[verified] > SEVERITY_RANK[draft] ? draft : verified;
 }
 
-/** Evidence must carry visible text; blank or control/format-only strings do not count. */
+/** Blocker evidence must cite a file it read, e.g. `src/storage.ts`; prose alone does not count. */
 function hasEvidence(evidence: string | undefined): boolean {
-  return /[\p{L}\p{N}]/u.test(evidence ?? "");
+  return /[\w/-]{2,}\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(evidence ?? "");
 }
 
 /**

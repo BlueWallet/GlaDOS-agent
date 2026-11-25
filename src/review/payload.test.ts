@@ -45,7 +45,15 @@ test("draft prompt is dry, strict, and covers the full review checklist", () => 
     assert.match(prompt, category);
   }
   assert.match(prompt, /Report every critical and high issue/i);
-  assert.match(prompt, /high: .*test gaps/i);
+  assert.doesNotMatch(prompt, /high: .*test gaps/i);
+  assert.match(prompt, /high \(blocking\): .*wrong money/i);
+  assert.match(prompt, /medium: .*without a test/i);
+  assert.match(prompt, /low: .*error messages/i);
+  assert.match(prompt, /wrong error message .* is low/i);
+  assert.match(prompt, /Do not raise the severity of a concern raised in an earlier round unless the code there got worse/i);
+  assert.match(prompt, /deliberately reuses an existing code path/i);
+  assert.match(prompt, /not as findings and not as follow-ups/i);
+  assert.doesNotMatch(prompt, /depends on it/i);
   assert.match(prompt, /silence is not permission/i);
   assert.doesNotMatch(prompt, /residual risk/i);
   assert.doesNotMatch(prompt, /missing niceties/i);
@@ -92,6 +100,10 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /Portal/);
   assert.match(prompt, /110% over-the-top/i);
   assert.match(prompt, /Avoid bland phrases/i);
+  assert.match(prompt, /high \(blocking\): .*wrong money/i);
+  assert.match(prompt, /wrong error message .* is low/i);
+  assert.doesNotMatch(prompt, /test gaps for changed behavior are valid high/i);
+  assert.match(prompt, /did not worsen or depend on/i);
 });
 
 test("voice prompt rewrites a clean draft without reopening the review", () => {
@@ -142,6 +154,32 @@ test("mergeVerifiedFindings keeps a blocker's severity when lowered without evid
     assert.equal(merged.findings[0]?.severity, "high");
     assert.match(merged.findings[0]!.body, /Probably fine/);
   }
+});
+
+test("verify cannot drop or demote a blocker on scope, reuse, or wording", () => {
+  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft);
+  assert.doesNotMatch(prompt, /deliberately reuses/);
+  assert.doesNotMatch(prompt, /out of scope/i);
+  assert.doesNotMatch(prompt, /from the PR's stated goal/);
+  assert.doesNotMatch(prompt, /only impact is user-facing text/);
+  assert.match(prompt, /concrete disproof from code you read\. If in doubt/);
+});
+
+test("blocker evidence must cite code, not just say something", () => {
+  const lowered = mergeVerifiedFindings(draft, {
+    summary: "Only the wording is wrong.",
+    findings: [
+      { candidate: 0, severity: "low", body: "Wrong error text.", evidence: "message-only: the rejection text says not a PSBT" },
+    ],
+  });
+  assert.equal(lowered.findings[0]?.severity, "high");
+
+  const dropped = mergeVerifiedFindings(draft, {
+    summary: "Out of scope.",
+    findings: [],
+    dropped: [{ candidate: 0, evidence: "out of scope per the PR description" }],
+  });
+  assert.equal(dropped.findings[0]?.severity, "high");
 });
 
 test("mergeVerifiedFindings will not raise severity above the draft", () => {
@@ -386,4 +424,9 @@ test("draft and verify prompts carry the reading rules without dropping the chec
     draftPrompt,
     /If the diff is too large for one pass, review it in several passes yourself/,
   );
+});
+
+test("a memory-based drop must still name the candidate's file", () => {
+  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft, "Settled: x");
+  assert.match(prompt, /cite that context and the candidate's file as evidence/);
 });

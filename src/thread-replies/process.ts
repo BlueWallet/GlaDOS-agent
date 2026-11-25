@@ -9,6 +9,12 @@ import {
   resolveReviewThread,
   type ReviewThread,
 } from "../github/threads.js";
+import { listIssueComments } from "../github/comments.js";
+import {
+  loadTrustedLogins,
+  repositoryPermissionLookup,
+  type PermissionLookup,
+} from "../github/permissions.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import { runAgentReview } from "../review/agent.js";
@@ -16,6 +22,12 @@ import { buildGithubReview } from "../review/payload.js";
 import { logReviewError } from "../review/process.js";
 import type { PullRequestRef } from "../types.js";
 import { runThreadReplies } from "./agent.js";
+import {
+  buildReviewMemory,
+  trustCandidates,
+  type ConversationComment,
+  type ReviewMemory,
+} from "./memory.js";
 import {
   assertCurrentThreadSnapshots,
   formatReplyBody,
@@ -74,27 +86,36 @@ export async function processPrReviewWithThreadReplies(
             repoDir,
           });
 
+          const prContext = await tryLoadPrContext(options.githubToken, pr, repoDir);
+          const memory = await loadReviewMemory(
+            {
+              threads: () => loadThreadState(options.githubToken, pr),
+              issueComments: () => listIssueComments(options.githubToken, pr),
+              lookup: repositoryPermissionLookup(options.githubToken, pr),
+            },
+            threadResult.settled,
+          );
+
           console.log(`  Reviewing ${pr.prUrl} ...`);
-          const settledContext = formatSettledContext(threadResult.settled);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
-            settledContext,
-            (draft) => suppressSettledFindings(draft, threadResult.settled),
-            await tryLoadPrContext(options.githubToken, pr, repoDir),
+            memory.context,
+            // Suppress on the draft only: verify cannot add findings, and its
+            // rewritten bodies must not be re-matched.
+            (draft) => {
+              const filtered = suppressSettledFindings(draft, memory.settled);
+              const suppressed = draft.findings.length - filtered.findings.length;
+              if (suppressed > 0) {
+                console.log(`  Suppressed ${suppressed} settled finding(s)`);
+              }
+              return filtered;
+            },
+            prContext,
           );
-          const filtered = suppressSettledFindings(
-            payload,
-            threadResult.settled,
-          );
-          const suppressed =
-            payload.findings.length - filtered.findings.length;
-          if (suppressed > 0) {
-            console.log(`  Suppressed ${suppressed} settled finding(s)`);
-          }
 
-          const review = sanitizeReviewForPost(buildGithubReview(filtered));
+          const review = sanitizeReviewForPost(buildGithubReview(payload));
           console.log(`  Verdict: ${review.event}`);
           console.log(`  ${review.comments.length} inline comment(s)`);
           await postGithubReview(options.githubToken, pr, review);
@@ -105,6 +126,44 @@ export async function processPrReviewWithThreadReplies(
   } catch (err) {
     logReviewError(err);
     return false;
+  }
+}
+
+export interface ReviewMemorySources {
+  threads: () => Promise<ThreadState>;
+  issueComments: () => Promise<ConversationComment[]>;
+  lookup: PermissionLookup;
+}
+
+/**
+ * Settled findings plus owner decisions for the review prompt, read after
+ * Phase A so unresolves and late replies count; `agreed` are this run's
+ * agreements. Memory is an aid: if loading fails, fall back to agreements
+ * only.
+ */
+export async function loadReviewMemory(
+  sources: ReviewMemorySources,
+  agreed: SettledFinding[],
+): Promise<ReviewMemory> {
+  try {
+    const [{ login, threads }, issueComments] = await Promise.all([
+      sources.threads(),
+      sources.issueComments(),
+    ]);
+    const trusted = await loadTrustedLogins(
+      sources.lookup,
+      trustCandidates(threads, issueComments, login),
+      login,
+    );
+    const memory = buildReviewMemory({ threads, gladosLogin: login, agreed, issueComments, trusted });
+    console.log(
+      `  Review memory: ${memory.settled.length} settled finding(s), ${trusted.size} trusted login(s), ${memory.context.length} chars`,
+    );
+    return memory;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`  Review memory unavailable, using agreements only: ${message}`);
+    return { settled: agreed, context: formatSettledContext(agreed) };
   }
 }
 

@@ -13,6 +13,7 @@ import {
   reviewDraftModel,
   reviewModelParams,
   reviewVerifyModel,
+  retiredByFilter,
   withSanitizedAgentEnvironment,
 } from "./agent.js";
 
@@ -221,4 +222,12 @@ test("retryable classification", () => {
   assert.equal(isRetryableSecondPassError(new Error("Agent returned empty review")), true);
   assert.equal(isRetryableSecondPassError(new SyntaxError("Unexpected token")), true);
   assert.equal(isRetryableSecondPassError(new Error(USAGE_LIMIT)), false);
+});
+
+test("a draft the settled filter emptied skips voice, so its retirement summary posts as is", () => {
+  const finding = { severity: "high" as const, path: "src/a.ts", line: 1, body: "x" };
+  const retired = { summary: "1 finding repeated a settled issue and stayed retired.", findings: [] };
+  assert.equal(retiredByFilter({ summary: "s", findings: [finding] }, retired), true);
+  assert.equal(retiredByFilter({ summary: "s", findings: [] }, { summary: "s", findings: [] }), false);
+  assert.equal(retiredByFilter({ summary: "s", findings: [finding] }, { summary: "s", findings: [finding] }), false);
 });
