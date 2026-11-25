@@ -128,7 +128,8 @@ export function buildReviewMemory(input: {
   for (const item of listSettledFindings(input.threads, input.gladosLogin, input.trusted)) {
     if (!byId.has(item.threadId)) byId.set(item.threadId, item);
   }
-  const settled = [...byId.values()];
+  // Oldest first so newestWithinBudget keeps the most recent settlements.
+  const settled = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   // A settled thread's reply is already its "why it was settled" line.
   const openThreads = input.threads.filter((thread) => !byId.has(thread.id));
   const decisions = selectOwnerDecisions(

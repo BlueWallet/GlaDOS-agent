@@ -16,6 +16,8 @@ export interface SettledFinding {
   /** Why it settled: GLaDOS's agreement, or the latest trusted reply on a trusted resolution. */
   agreementBody: string;
   settledBy: "agreement" | "resolution";
+  /** When GLaDOS raised it (root comment); orders memory oldest first. */
+  createdAt: string;
 }
 
 export interface ThreadReplyDecision {
@@ -134,6 +136,7 @@ export function listSettledFindings(
       path: thread.path,
       line: thread.line,
       originalBody: root.body,
+      createdAt: root.createdAt,
     };
     const agreement = findAgreementComment(thread, gladosLogin);
     if (agreement) {

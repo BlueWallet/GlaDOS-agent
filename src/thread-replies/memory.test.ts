@@ -148,6 +148,7 @@ test("review memory merges agreements with trusted resolutions and builds one co
     originalBody: "old",
     agreementBody: "agreed",
     settledBy: "agreement",
+    createdAt: "2026-03-01T00:00:00Z",
   };
   const memory = buildReviewMemory({
     threads,
@@ -158,9 +159,10 @@ test("review memory merges agreements with trusted resolutions and builds one co
   });
   assert.deepEqual(
     memory.settled.map((item) => [item.threadId, item.settledBy]),
+    // Oldest first, whatever settled it, so the newest survive the budget.
     [
-      ["PRRT_9", "agreement"],
       ["PRRT_1", "resolution"],
+      ["PRRT_9", "agreement"],
     ],
   );
   assert.match(memory.context, /Declined: request-scoped/);

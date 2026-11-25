@@ -275,6 +275,7 @@ test("settled findings are removed by path and exact issue text or code topic", 
       originalBody: "**[HIGH]** The cache is stale.",
       agreementBody: "The clarification is convincing.",
       settledBy: "agreement",
+      createdAt: "2026-01-01T00:00:00Z",
     },
   ];
   const payload: ReviewPayload = {
@@ -329,6 +330,7 @@ test("settled review context includes why GLaDOS agreed", () => {
       originalBody: "The cache is stale.",
       agreementBody: "The author showed this is request-scoped.",
       settledBy: "agreement",
+      createdAt: "2026-01-01T00:00:00Z",
     },
   ]);
 
@@ -438,6 +440,7 @@ test("settled context explains both ways a finding settles", () => {
       originalBody: "The cache is stale.",
       agreementBody: "Fixed in abc123.",
       settledBy: "resolution",
+      createdAt: "2026-01-01T00:00:00Z",
     },
   ]);
   assert.match(context, /resolved by the PR author or a maintainer/i);
@@ -463,6 +466,7 @@ const settledPsbt: SettledFinding = {
     "**[MEDIUM]** Oh, splendid. `Psbt.read(scanned).right` collapses to `theirs == null`, and `inputSignatures` only runs after that read.",
   agreementBody: "Follow-up for a separate PR.",
   settledBy: "resolution",
+  createdAt: "2026-01-01T00:00:00Z",
 };
 
 test("a reworded repeat of a settled finding on the same file is suppressed", () => {
@@ -516,6 +520,7 @@ test("settled context is bounded per finding and in total", () => {
     originalBody: `finding-${index} ${"x".repeat(3000)}`,
     agreementBody: `reason-${index} ${"y".repeat(3000)}`,
     settledBy: "resolution",
+    createdAt: "2026-01-01T00:00:00Z",
   }));
   const context = formatSettledContext(many);
   assert.ok(context.length <= SETTLED_CONTEXT_MAX_CHARS + 1000, String(context.length));
@@ -545,6 +550,7 @@ function settledAt(path: string, originalBody: string): SettledFinding {
     originalBody,
     agreementBody: "Fixed.",
     settledBy: "resolution",
+    createdAt: "2026-01-01T00:00:00Z",
   };
 }
 
