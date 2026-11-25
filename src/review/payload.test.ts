@@ -159,44 +159,17 @@ test("mergeVerifiedFindings keeps a blocker's severity when lowered without evid
   }
 });
 
-test("mergeVerifiedFindings lowers a message-only blocker to low without evidence", () => {
+test("verify prompt lets a message-only blocker drop to low with the message as evidence", () => {
+  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft);
+  assert.match(prompt, /only impact is user-facing text, wording, or docs, lower it to low/i);
+  assert.doesNotMatch(prompt, /messageOnly/);
   const merged = mergeVerifiedFindings(draft, {
     summary: "Only the wording is wrong.",
-    findings: [{ candidate: 0, severity: "low", body: "Wrong error text.", messageOnly: true }],
+    findings: [
+      { candidate: 0, severity: "low", body: "Wrong error text.", evidence: "message-only: the rejection text says not a PSBT" },
+    ],
   });
   assert.equal(merged.findings[0]?.severity, "low");
-});
-
-test("mergeVerifiedFindings still needs evidence to lower a message-only blocker above low", () => {
-  const merged = mergeVerifiedFindings(draft, {
-    summary: "Only the wording is wrong.",
-    findings: [{ candidate: 0, severity: "medium", body: "Wrong error text.", messageOnly: true }],
-  });
-  assert.equal(merged.findings[0]?.severity, "high");
-});
-
-test("parseVerifiedReviewResult reads messageOnly and rejects a non-boolean", () => {
-  const parsed = parseVerifiedReviewResult(
-    JSON.stringify({
-      summary: "s",
-      findings: [{ candidate: 0, severity: "low", body: "b", messageOnly: true }],
-    }),
-  );
-  assert.equal(parsed.findings[0]?.messageOnly, true);
-  assert.throws(() =>
-    parseVerifiedReviewResult(
-      JSON.stringify({
-        summary: "s",
-        findings: [{ candidate: 0, severity: "low", body: "b", messageOnly: "yes" }],
-      }),
-    ),
-  );
-});
-
-test("verify prompt explains message-only lowering", () => {
-  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft);
-  assert.match(prompt, /"messageOnly": true/);
-  assert.match(prompt, /only impact is user-facing text/i);
 });
 
 test("mergeVerifiedFindings will not raise severity above the draft", () => {
