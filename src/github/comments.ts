@@ -29,16 +29,3 @@ export async function listIssueComments(
     createdAt: comment.created_at,
   }));
 }
-
-export async function getPullRequestAuthor(
-  githubToken: string,
-  pr: Pick<PullRequestRef, "owner" | "repo" | "prNumber">,
-): Promise<string> {
-  const octokit = github.getOctokit(githubToken);
-  const { data } = await octokit.rest.pulls.get({
-    owner: pr.owner,
-    repo: pr.repo,
-    pull_number: pr.prNumber,
-  });
-  return data.user?.login ?? "";
-}

@@ -9,7 +9,7 @@ import {
   resolveReviewThread,
   type ReviewThread,
 } from "../github/threads.js";
-import { getPullRequestAuthor, listIssueComments } from "../github/comments.js";
+import { listIssueComments } from "../github/comments.js";
 import {
   loadTrustedLogins,
   repositoryPermissionLookup,
@@ -86,10 +86,12 @@ export async function processPrReviewWithThreadReplies(
             repoDir,
           });
 
+          const prContext = await tryLoadPrContext(options.githubToken, pr, repoDir);
           const memory = await loadReviewMemory(
             options.githubToken,
             pr,
             threadResult,
+            prContext?.author ?? "",
           );
 
           console.log(`  Reviewing ${pr.prUrl} ...`);
@@ -99,7 +101,7 @@ export async function processPrReviewWithThreadReplies(
             options.cursorApiKey,
             memory.context,
             (draft) => suppressSettledFindings(draft, memory.settled),
-            await tryLoadPrContext(options.githubToken, pr, repoDir),
+            prContext,
           );
           const filtered = suppressSettledFindings(payload, memory.settled);
           const suppressed =
@@ -123,20 +125,18 @@ export async function processPrReviewWithThreadReplies(
 }
 
 /**
- * Settled findings plus owner decisions and earlier findings for the review
- * prompt. Memory is an aid: if loading it fails, fall back to agreements only.
+ * Settled findings plus owner decisions for the review prompt. `author` is
+ * empty when PR context failed to load; then only write access counts. Memory is an aid: if loading it fails, fall back to agreements only.
  */
 async function loadReviewMemory(
   githubToken: string,
   pr: PullRequestRef,
   threadResult: ThreadProcessResult,
+  author: string,
 ): Promise<ReviewMemory> {
   const { login, threads } = threadResult.state;
   try {
-    const [author, issueComments] = await Promise.all([
-      getPullRequestAuthor(githubToken, pr),
-      listIssueComments(githubToken, pr),
-    ]);
+    const issueComments = await listIssueComments(githubToken, pr);
     const trusted = await loadTrustedLogins(
       repositoryPermissionLookup(githubToken, pr),
       author,
