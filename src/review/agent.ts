@@ -72,6 +72,11 @@ export function reviewModelParams(
   ];
 }
 
+/** The settled filter emptied a non-empty draft: its summary is the record, so voice must not rewrite it. */
+export function retiredByFilter(drafted: ReviewPayload, draft: ReviewPayload): boolean {
+  return drafted.findings.length > 0 && draft.findings.length === 0;
+}
+
 export async function runAgentReview(
   repoDir: string,
   prUrl: string,
@@ -94,6 +99,7 @@ export async function runAgentReview(
     "xhigh",
   );
   const draft = filterDraft(drafted);
+  if (retiredByFilter(drafted, draft)) return draft;
   if (draft.findings.length === 0) {
     const voiceModel = reviewVerifyModel();
     const voiceParams = reviewModelParams(voiceModel, "xhigh");

@@ -136,7 +136,7 @@ Two agent passes, then optional settled-finding suppression:
 - settled findings (original body + why: GLaDOS agreement, or the resolver's latest reply on a thread resolved by a trusted user — other trusted replies there stay owner decisions; 600 chars per text, 16,000 total, oldest first, newest kept; encoded JSON inside `BEGIN/END_UNTRUSTED_SETTLED_FINDINGS`);
 - owner decisions: conversation comments and replies on unsettled threads by trusted humans, newest kept, 1,500 chars each, 12,000 total, encoded JSON inside `BEGIN/END_UNTRUSTED_OWNER_DECISIONS` — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm.
 
-Settled repeats are suppressed on the draft only (verify cannot add findings): same path and exact text, or the same code topic — the finding names ≥ 2 identifiers (fenced blocks and ubiquitous tokens like `null`/`error` ignored), all already in the settled text, covering ≥ half of it. An emptied draft gets an explicit "repeated a settled issue" summary. Open/disagreed threads do **not** suppress new findings. If memory cannot load, the review falls back to agreements only.
+Settled repeats are suppressed on the draft only (verify cannot add findings): same path and exact text, or the same code topic — the finding names ≥ 2 identifiers (fenced blocks and ubiquitous tokens like `null`/`error` ignored), all already in the settled text, covering ≥ half of it. An emptied draft gets an explicit "repeated a settled issue" summary, posted as is (no voice pass). Open/disagreed threads do **not** suppress new findings. If memory cannot load, the review falls back to agreements only.
 
 **Approve vs request changes:** `critical` or `high` → `REQUEST_CHANGES`; else `APPROVE`.
 
