@@ -13,6 +13,7 @@ import {
   codeTopics,
   formatReplyBody,
   formatSettledContext,
+  SETTLED_CONTEXT_MAX_CHARS,
   isAwaitingThread,
   isResolutionPending,
   isSettledThread,
@@ -504,4 +505,19 @@ test("topic suppression keeps new topics, other files, and single shared identif
   ];
   const filtered = suppressSettledFindings({ summary: "s", findings }, [settledPsbt]);
   assert.deepEqual(filtered.findings, findings);
+});
+
+test("settled context is bounded per finding and in total", () => {
+  const many: SettledFinding[] = Array.from({ length: 60 }, (_, index) => ({
+    threadId: `PRRT_${index}`,
+    path: "src/example.ts",
+    line: index,
+    originalBody: `finding-${index} ${"x".repeat(3000)}`,
+    agreementBody: `reason-${index} ${"y".repeat(3000)}`,
+    settledBy: "resolution",
+  }));
+  const context = formatSettledContext(many);
+  assert.ok(context.length <= SETTLED_CONTEXT_MAX_CHARS + 1000, String(context.length));
+  assert.match(context, /finding-0 /);
+  assert.match(context, /more settled finding\(s\) omitted/);
 });

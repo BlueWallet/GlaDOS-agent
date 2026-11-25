@@ -5,6 +5,7 @@ import {
   formatSettledContext,
   listSettledFindings,
   stripGladosControlMarkers,
+  truncateText,
   type SettledFinding,
 } from "./logic.js";
 
@@ -71,7 +72,7 @@ export function formatOwnerDecisions(comments: ConversationComment[]): string {
     OWNER_DECISIONS_MAX_CHARS,
     (comment) => {
       const where = comment.path ? ` on \`${comment.path}\`` : "";
-      const body = truncate(comment.body, OWNER_COMMENT_MAX_CHARS);
+      const body = truncateText(comment.body, OWNER_COMMENT_MAX_CHARS);
       return `- ${comment.createdAt} @${comment.authorLogin}${where}: ${encodeUntrustedPromptData(body)}`;
     },
   );
@@ -105,7 +106,7 @@ export function formatEarlierFindings(
   const entries = newestWithinBudget(roots, EARLIER_FINDINGS_MAX_CHARS, ({ thread, root }) => {
     const body = stripGladosControlMarkers(root.body);
     const severity = body.match(SEVERITY_TAG)?.[1]?.toUpperCase() ?? "UNKNOWN";
-    const text = truncate(body.replace(SEVERITY_TAG, ""), EARLIER_FINDING_MAX_CHARS);
+    const text = truncateText(body.replace(SEVERITY_TAG, ""), EARLIER_FINDING_MAX_CHARS);
     const loc = thread.line != null ? `${thread.path}:${thread.line}` : thread.path;
     const state = thread.isResolved ? "resolved" : "open";
     return `- [${severity}] \`${loc}\` (${state}): ${encodeUntrustedPromptData(text)}`;
@@ -140,10 +141,6 @@ function newestWithinBudget<T>(
   return kept.reverse();
 }
 
-function truncate(text: string, max: number): string {
-  const trimmed = text.trim();
-  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
-}
 
 /**
  * Logins whose trust matters: resolvers of GLaDOS threads, and human authors
