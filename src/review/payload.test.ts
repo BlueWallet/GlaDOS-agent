@@ -158,6 +158,46 @@ test("mergeVerifiedFindings keeps a blocker's severity when lowered without evid
   }
 });
 
+test("mergeVerifiedFindings lowers a message-only blocker to low without evidence", () => {
+  const merged = mergeVerifiedFindings(draft, {
+    summary: "Only the wording is wrong.",
+    findings: [{ candidate: 0, severity: "low", body: "Wrong error text.", messageOnly: true }],
+  });
+  assert.equal(merged.findings[0]?.severity, "low");
+});
+
+test("mergeVerifiedFindings still needs evidence to lower a message-only blocker above low", () => {
+  const merged = mergeVerifiedFindings(draft, {
+    summary: "Only the wording is wrong.",
+    findings: [{ candidate: 0, severity: "medium", body: "Wrong error text.", messageOnly: true }],
+  });
+  assert.equal(merged.findings[0]?.severity, "high");
+});
+
+test("parseVerifiedReviewResult reads messageOnly and rejects a non-boolean", () => {
+  const parsed = parseVerifiedReviewResult(
+    JSON.stringify({
+      summary: "s",
+      findings: [{ candidate: 0, severity: "low", body: "b", messageOnly: true }],
+    }),
+  );
+  assert.equal(parsed.findings[0]?.messageOnly, true);
+  assert.throws(() =>
+    parseVerifiedReviewResult(
+      JSON.stringify({
+        summary: "s",
+        findings: [{ candidate: 0, severity: "low", body: "b", messageOnly: "yes" }],
+      }),
+    ),
+  );
+});
+
+test("verify prompt explains message-only lowering", () => {
+  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft);
+  assert.match(prompt, /"messageOnly": true/);
+  assert.match(prompt, /only impact is user-facing text/i);
+});
+
 test("mergeVerifiedFindings will not raise severity above the draft", () => {
   const merged = mergeVerifiedFindings(draft, {
     summary: "Unchanged.",

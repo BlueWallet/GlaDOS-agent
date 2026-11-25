@@ -28,6 +28,8 @@ export interface VerifiedReviewFinding {
   severity: Severity;
   body: string;
   evidence?: string;
+  /** Only impact is user-facing text, wording, or docs: may be lowered to low without evidence. */
+  messageOnly?: boolean;
 }
 
 export interface DroppedCandidate {
@@ -128,7 +130,7 @@ export function applyPersonality(text: string): string {
 }
 
 const REVIEW_JSON_SCHEMA = `{ "summary": "overall very concise review in markdown", "findings": [{ "severity": "${SEVERITIES.join("|")}", "path": "relative/path.ts", "line": 42, "body": "critique of this exact line" }] }`;
-const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate", "evidence": "only when lowering a critical or high candidate below high: file and code that justifies it" }], "dropped": [{ "candidate": 1, "evidence": "file and code that disproves this candidate" }] }`;
+const VERIFY_JSON_SCHEMA = `{ "summary": "overall very concise verified review in markdown", "findings": [{ "candidate": 0, "severity": "${SEVERITIES.join("|")}", "body": "verified critique of this candidate", "evidence": "only when lowering a critical or high candidate below high: file and code that justifies it", "messageOnly": true }], "dropped": [{ "candidate": 1, "evidence": "file and code that disproves this candidate" }] }`;
 const EMPTY_VERIFIED_SUMMARY =
   "No candidate defects survived verification. The test chamber remains disappointingly intact.";
 
@@ -262,6 +264,7 @@ export function buildVerifyPrompt(
     "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
     "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
     "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
+    "When a kept finding's only impact is user-facing text, wording, or docs, set \"messageOnly\": true and lower it to low; no evidence is needed for that. Omit \"messageOnly\" otherwise.",
     "A candidate is either kept in \"findings\" or listed in \"dropped\", never both.",
     "",
     "You may lower severity. Do not raise severity. Do not add findings that were not in the candidate list.",
@@ -366,10 +369,13 @@ export function mergeVerifiedFindings(
 
     const severity = capSeverity(candidate.severity, finding.severity);
     const unblocked = isBlocker(candidate.severity) && !isBlocker(severity);
+    const messageOnlyLow = finding.messageOnly === true && severity === "low";
     return {
       ...candidate,
       severity:
-        unblocked && !hasEvidence(finding.evidence) ? candidate.severity : severity,
+        unblocked && !hasEvidence(finding.evidence) && !messageOnlyLow
+          ? candidate.severity
+          : severity,
       body: finding.body,
     };
   });
@@ -464,7 +470,8 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         typeof finding.severity !== "string" ||
         !isSeverity(finding.severity) ||
         typeof finding.body !== "string" ||
-        (finding.evidence !== undefined && typeof finding.evidence !== "string")
+        (finding.evidence !== undefined && typeof finding.evidence !== "string") ||
+        (finding.messageOnly !== undefined && typeof finding.messageOnly !== "boolean")
       ) {
         throw new Error(`Invalid verified finding at index ${index}`);
       }
@@ -473,6 +480,7 @@ export function parseVerifiedReviewResult(text: string): VerifiedReviewPayload {
         severity: finding.severity,
         body: finding.body,
         ...(finding.evidence ? { evidence: finding.evidence } : {}),
+        ...(finding.messageOnly === true ? { messageOnly: true } : {}),
       };
     }),
   };
