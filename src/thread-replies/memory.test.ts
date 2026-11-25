@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ReviewThread, ReviewThreadComment } from "../github/threads.js";
-import { AGREE_MARKER, type SettledFinding } from "./logic.js";
+import { AGREE_MARKER, formatReplyBody, type SettledFinding } from "./logic.js";
 import {
   buildReviewMemory,
   trustCandidates,
@@ -289,4 +289,26 @@ test("unsettled GLaDOS findings carry their severity into context, not into supp
   assert.doesNotMatch(block, /cacheKey|Human root note/);
   assert.match(memory.context, /keep that severity unless the code there got worse/);
   assert.deepEqual(memory.settled.map((item) => item.threadId), ["PRRT_2"]);
+});
+
+test("trusted replies on an agreed thread stay owner decisions; the agreement does not", () => {
+  const memory = buildReviewMemory({
+    threads: [
+      thread("PRRT_1", [
+        threadComment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z"),
+        threadComment("2", "alice", "Intentional: change output is first.", "2026-01-02T00:00:00Z"),
+        threadComment("3", glados, formatReplyBody("agree", "Fine, agreed.", "2"), "2026-01-03T00:00:00Z"),
+        threadComment("4", "bob", "This still pays the wrong output.", "2026-01-04T00:00:00Z"),
+      ]),
+    ],
+    gladosLogin: glados,
+    agreed: [],
+    issueComments: [],
+    trusted: new Set(["alice", "bob"]),
+  });
+  assert.deepEqual(memory.settled.map((item) => item.settledBy), ["agreement"]);
+  const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
+  assert.match(decisions, /change output is first/);
+  assert.match(decisions, /still pays the wrong output/);
+  assert.doesNotMatch(decisions, /Fine, agreed/);
 });
