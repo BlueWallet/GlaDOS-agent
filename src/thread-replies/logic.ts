@@ -179,8 +179,10 @@ export const SETTLED_CONTEXT_MAX_CHARS = 16_000;
 export function formatSettledContext(settled: SettledFinding[]): string {
   const text = (value: string) =>
     truncateText(stripGladosControlMarkers(value), SETTLED_TEXT_MAX_CHARS);
+  // Oldest first, so the budget keeps the newest whatever order callers pass.
+  const oldestFirst = [...settled].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const entries = newestWithinBudget(
-    settled.map((item) => ({
+    oldestFirst.map((item) => ({
       thread: item.threadId,
       location: item.line != null ? `${item.path}:${item.line}` : item.path,
       finding: text(item.originalBody),

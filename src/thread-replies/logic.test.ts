@@ -625,3 +625,19 @@ test("the settle reason is the resolver's own reply, not a later trusted one", (
   const [silent] = listSettledFindings([thread([root, objection], resolved)], glados, trusted);
   assert.equal(silent!.agreementBody, "Resolved by @alice.");
 });
+
+test("settled context keeps the newest whatever order it is given", () => {
+  // Newest first, as the memory-load fallback may pass them.
+  const items: SettledFinding[] = Array.from({ length: 30 }, (_, index) => ({
+    threadId: `PRRT_${index}`,
+    path: "src/a.ts",
+    line: index,
+    originalBody: `finding-${index}| ${"x".repeat(580)}`,
+    agreementBody: "y".repeat(600),
+    settledBy: "agreement",
+    createdAt: `2026-01-01T00:00:${String(59 - index).padStart(2, "0")}Z`,
+  }));
+  const context = formatSettledContext(items);
+  assert.match(context, /finding-0\|/);
+  assert.doesNotMatch(context, /finding-29\|/);
+});

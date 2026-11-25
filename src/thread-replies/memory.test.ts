@@ -159,13 +159,14 @@ test("review memory merges agreements with trusted resolutions and builds one co
     trusted: new Set(["alice"]),
   });
   assert.deepEqual(
-    memory.settled.map((item) => [item.threadId, item.settledBy]),
-    // Oldest first, whatever settled it, so the newest survive the budget.
+    memory.settled.map((item) => [item.threadId, item.settledBy]).sort(),
     [
       ["PRRT_1", "resolution"],
       ["PRRT_9", "agreement"],
     ],
   );
+  // Oldest first in the prompt, whatever settled it, so the newest survive the budget.
+  assert.ok(memory.context.indexOf("PRRT_1") < memory.context.indexOf("PRRT_9"));
   assert.match(memory.context, /Declined: request-scoped/);
   assert.match(memory.context, /parity with hot sends/);
   assert.doesNotMatch(memory.context, /Still open/);
