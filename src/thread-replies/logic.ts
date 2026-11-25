@@ -445,7 +445,7 @@ function normalizeFindingBody(body: string): string {
     .toLowerCase();
 }
 
-function encodeUntrustedPromptData(value: string): string {
+export function encodeUntrustedPromptData(value: string): string {
   return value.replace(/[<>&]/g, (character) => {
     if (character === "<") return "\\u003c";
     if (character === ">") return "\\u003e";

@@ -6,6 +6,8 @@ export interface ReviewThreadComment {
   id: string;
   body: string;
   authorLogin: string;
+  /** GitHub App / bot account (GraphQL logins omit the `[bot]` suffix). */
+  authorIsBot: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,7 +36,7 @@ interface GqlComment {
   body: string;
   createdAt: string;
   updatedAt: string;
-  author: { login: string } | null;
+  author: { login: string; __typename?: string } | null;
 }
 
 interface GqlThread {
@@ -99,7 +101,7 @@ export async function listReviewThreads(
                     body
                     createdAt
                     updatedAt
-                    author { login }
+                    author { __typename login }
                   }
                 }
               }
@@ -156,7 +158,7 @@ export async function getReviewThread(
               body
               createdAt
               updatedAt
-              author { login }
+              author { __typename login }
             }
           }
         }
@@ -210,7 +212,7 @@ async function loadAllComments(
                 body
                 createdAt
                 updatedAt
-                author { login }
+                author { __typename login }
               }
             }
           }
@@ -249,6 +251,7 @@ function mapComments(nodes: GqlComment[]): ReviewThreadComment[] {
       id: node.id,
       body: node.body,
       authorLogin: node.author?.login ?? "",
+      authorIsBot: node.author?.__typename === "Bot",
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
     };

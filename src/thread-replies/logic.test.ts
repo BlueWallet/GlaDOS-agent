@@ -33,7 +33,7 @@ function comment(
   body: string,
   createdAt: string,
 ): ReviewThreadComment {
-  return { id, authorLogin, body, createdAt, updatedAt: createdAt };
+  return { id, authorLogin, authorIsBot: false, body, createdAt, updatedAt: createdAt };
 }
 
 function thread(
