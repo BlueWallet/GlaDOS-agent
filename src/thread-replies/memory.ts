@@ -5,7 +5,6 @@ import {
   formatSettledContext,
   listSettledFindings,
   newestWithinBudget,
-  reopenedAfterAgreement,
   SETTLED_TEXT_MAX_CHARS,
   stripGladosControlMarkers,
   truncateText,
@@ -153,7 +152,7 @@ export interface ReviewMemory {
   context: string;
 }
 
-/** Settled findings (agreements first) and the full prompt appendix. */
+/** Settled findings and the full prompt appendix. */
 export function buildReviewMemory(input: {
   threads: ReviewThread[];
   gladosLogin: string;
@@ -161,15 +160,16 @@ export function buildReviewMemory(input: {
   issueComments: ConversationComment[];
   trusted: ReadonlySet<string>;
 }): ReviewMemory {
-  const byId = new Map(input.agreed.map((item) => [item.threadId, item]));
-  for (const item of listSettledFindings(input.threads, input.gladosLogin, input.trusted)) {
-    if (!byId.has(item.threadId)) byId.set(item.threadId, item);
-  }
-  for (const thread of input.threads) {
-    const agreed = byId.get(thread.id)?.settledBy === "agreement";
-    if (agreed && reopenedAfterAgreement(thread, input.gladosLogin, input.trusted)) {
-      byId.delete(thread.id);
-    }
+  // The loaded threads are authoritative; `agreed` only fills in threads they lack.
+  const byId = new Map(
+    listSettledFindings(input.threads, input.gladosLogin, input.trusted).map((item) => [
+      item.threadId,
+      item,
+    ]),
+  );
+  const loaded = new Set(input.threads.map((thread) => thread.id));
+  for (const item of input.agreed) {
+    if (!loaded.has(item.threadId)) byId.set(item.threadId, item);
   }
   const settled = [...byId.values()];
   // Drop only replies already shown as a settle reason: the resolver's on a

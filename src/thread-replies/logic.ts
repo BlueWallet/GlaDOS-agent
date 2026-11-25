@@ -443,23 +443,6 @@ export function formatReplyBody(
   return `${text}\n\n${replyMarker}`;
 }
 
-/** A trusted human replied after GLaDOS's agreement: the issue is open again. */
-export function reopenedAfterAgreement(
-  thread: ReviewThread,
-  gladosLogin: string,
-  trusted: ReadonlySet<string>,
-): boolean {
-  const agreement = findAgreementComment(thread, gladosLogin);
-  if (!agreement) return false;
-  const glados = gladosLogin.toLowerCase();
-  return thread.comments
-    .slice(thread.comments.indexOf(agreement) + 1)
-    .some((comment) => {
-      const login = comment.authorLogin.toLowerCase();
-      return login !== glados && !comment.authorIsBot && trusted.has(login);
-    });
-}
-
 function findAgreementComment(
   thread: ReviewThread,
   gladosLogin: string,
@@ -480,11 +463,16 @@ function findAgreementComment(
         (candidate) => candidate.id === acknowledgedId,
       );
       if (acknowledgedIndex < 0 || acknowledgedIndex >= index) return false;
-      return !thread.comments
-        .slice(acknowledgedIndex + 1, index)
-        .some(
-          (candidate) => candidate.authorLogin.toLowerCase() !== login,
-        );
+      // No other comment between the acknowledged reply and the agreement, and
+      // no human reply after it: a later reply reopens the thread.
+      const human = (candidate: ReviewThread["comments"][number]) =>
+        candidate.authorLogin.toLowerCase() !== login && !candidate.authorIsBot;
+      return (
+        !thread.comments
+          .slice(acknowledgedIndex + 1, index)
+          .some((candidate) => candidate.authorLogin.toLowerCase() !== login) &&
+        !thread.comments.slice(index + 1).some(human)
+      );
     }
     return false;
   });

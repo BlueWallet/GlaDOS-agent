@@ -641,3 +641,16 @@ test("settled context keeps the newest whatever order it is given", () => {
   assert.match(context, /finding-0\|/);
   assert.doesNotMatch(context, /finding-29\|/);
 });
+
+test("a human reply after an agreement reopens the thread for an answer", () => {
+  const reopened = thread([
+    comment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z"),
+    comment("2", "alice", "Intentional.", "2026-01-02T00:00:00Z"),
+    comment("3", glados, formatReplyBody("agree", "Agreed.", "2"), "2026-01-03T00:00:00Z"),
+    comment("4", "bob", "This still pays the wrong output.", "2026-01-04T00:00:00Z"),
+  ]);
+  assert.equal(isSettledThread(reopened, glados), false);
+  assert.equal(isResolutionPending(reopened, glados), false);
+  assert.equal(isAwaitingThread(reopened, glados), true);
+  assert.deepEqual(listSettledFindings([reopened], glados), []);
+});
