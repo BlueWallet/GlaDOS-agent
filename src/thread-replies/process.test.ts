@@ -46,7 +46,6 @@ test("review memory reads threads after Phase A and keeps this run's agreements"
       lookup: writeAccess,
     },
     agreed,
-    "alice",
   );
   assert.deepEqual(memory.settled.map((item) => item.threadId), ["PRRT_2"]);
   assert.match(memory.context, /still pays the wrong output/);
@@ -68,7 +67,6 @@ test("review memory falls back to this run's agreements when loading fails", asy
       lookup: writeAccess,
     },
     agreed,
-    "alice",
   );
   assert.deepEqual(memory.settled, agreed);
   assert.match(memory.context, /BEGIN_UNTRUSTED_SETTLED_FINDINGS/);

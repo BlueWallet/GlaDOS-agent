@@ -90,7 +90,7 @@ cli/notifications.ts
        thread-replies.processPrReviewWithThreadReplies()
          → withPrLock + withPrWorkspace
          → Phase A (processReviewThreads)
-         → review memory: PR author, issue comments, permission lookups → trusted logins
+         → review memory: threads re-read, issue comments, permission lookups → trusted logins (write access only)
          → review/agent.runAgentReview(+ settled context, owner decisions)
          → suppressSettledFindings + sanitize markers
          → payload.buildGithubReview → reviews.postGithubReview
@@ -132,7 +132,7 @@ Two agent passes, then optional settled-finding suppression:
 
 **Scope** (`SCOPE_RULES`, draft only): the PR is judged against its stated goal/spec (title, body, spec docs in the diff). Matching the current behavior of an existing path the PR deliberately reuses is correct. Out-of-scope and pre-existing issues are dropped entirely — not findings, not follow-ups. Verify does not get these rules: it may drop or demote a blocker only with code disproof.
 
-**Review memory** (composed with thread replies, `thread-replies/memory.ts`): before each full review GLaDOS loads the PR author, the review threads (re-read after Phase A, so unresolves and late replies count; this run's agreements are kept), conversation comments, and permissions (`getCollaboratorPermissionLevel`; `admin`/`write` permission or `admin`/`maintain`/`write` role; GLaDOS and bots never count, including a `Bot` resolver by `__typename`; failed lookups are untrusted). It injects as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`:
+**Review memory** (composed with thread replies, `thread-replies/memory.ts`): before each full review GLaDOS loads the review threads (re-read after Phase A, so unresolves and late replies count; this run's agreements are kept), conversation comments, and permissions (`getCollaboratorPermissionLevel`; `admin`/`write` permission or `admin`/`maintain`/`write` role; GLaDOS and bots never count, including a `Bot` resolver by `__typename`; failed lookups are untrusted). It injects as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`:
 - settled findings (original body + why: GLaDOS agreement — any later human reply reopens it: GLaDOS answers it in Phase A and it is neither settled nor suppressed — or the resolver's latest reply on a thread resolved by a trusted user — other trusted replies there stay owner decisions; 600 chars per text, 16,000 total, oldest first, newest kept; encoded JSON inside `BEGIN/END_UNTRUSTED_SETTLED_FINDINGS`);
 - open findings: GLaDOS's unsettled root comments (severity tag included), 600 chars each, 8,000 total, encoded JSON inside `BEGIN/END_UNTRUSTED_OPEN_FINDINGS` — context for the no-escalation rule only, never suppressed;
 - owner decisions: conversation comments and thread replies by trusted humans (on agreed threads too; only a resolver's reply on a thread they resolved is left out, as it is the settle reason), newest kept, 1,500 chars each, 12,000 total, encoded JSON inside `BEGIN/END_UNTRUSTED_OWNER_DECISIONS` — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm.
@@ -198,4 +198,4 @@ Design detail: `docs/superpowers/specs/2026-08-05-review-thread-replies-design.m
 | `GLADOS_REVIEW_MODEL` | Optional draft-pass model (default `grok-4.7` with `reasoning_effort=xhigh`, `fast=false`) |
 | `GLADOS_VERIFY_MODEL` | Optional verify and voice model (default `grok-4.7` with `reasoning_effort=xhigh`, `fast=false`) |
 
-`GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry. Review memory reads collaborator permissions; if GitHub refuses that lookup, those users count as untrusted (the PR author is always trusted).
+`GLADOS_TOKEN` needs access to arbitrary repos that send review requests (`repo` scope or equivalent). Resolving conversations additionally requires being the PR author **or** having write access on the repo — when that fails, agreement still settles for the following full review but Phase A stays incomplete for retry. Review memory reads collaborator permissions; if GitHub refuses that lookup, those users count as untrusted. Being the PR author alone never makes a login trusted.

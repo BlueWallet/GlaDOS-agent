@@ -10,8 +10,8 @@ unhandled edge case or test gap was blocking. The owner approved three changes.
 
 | Topic | Choice |
 |-------|--------|
-| Settled by resolution | A GLaDOS thread is settled when it is resolved and `resolvedBy` is the PR author or a user with write, maintain, or admin permission. Any other resolver does not count. The agree-marker path stays. |
-| Who is trusted | PR author (any permission), or `getCollaboratorPermissionLevel` reports `admin`/`write` permission or role `admin`/`maintain`/`write`. GLaDOS itself and bots (`[bot]` logins, `Bot` type) are never trusted. A permission lookup that fails counts as untrusted. |
+| Settled by resolution | A GLaDOS thread is settled when it is resolved and `resolvedBy` is a user with write, maintain, or admin permission. Any other resolver does not count. The agree-marker path stays. |
+| Who is trusted | `getCollaboratorPermissionLevel` reports `admin`/`write` permission or role `admin`/`maintain`/`write`. GLaDOS itself and bots (`[bot]` logins, `Bot` type) are never trusted. A permission lookup that fails counts as untrusted. |
 | Re-raise suppression | Same path and (exact normalized body, or same topic). Topic = code identifiers (single-line backtick spans, camelCase/snake_case/dotted words; fenced blocks and ubiquitous tokens ignored). Same topic: the finding names at least 2 identifiers, all already in the settled text, covering at least half of it. Runs on the draft only; an emptied draft gets an explicit summary. Deterministic backstop; the prompt carries the main rule. |
 | Owner decisions | Issue (conversation) comments and review-thread replies (not roots) by trusted users, excluding GLaDOS and bots, are passed to draft and verify prompts as owner decisions, newest kept first, each capped at 1,500 chars, total 12,000 chars, presented in chronological order as encoded JSON between untrusted-data sentinels (settled findings likewise). |
 | Owner-decision rule | Do not re-raise findings the owner declined or deferred, and do not reopen an owner decision unless you show new evidence of concrete harm. |
@@ -25,7 +25,7 @@ unhandled edge case or test gap was blocking. The owner approved three changes.
 
 ```
 processPrReviewWithThreadReplies
-  → loadThreadState: login, threads (+ resolvedBy); PR author from PR context; issue comments
+  → loadThreadState: login, threads (+ resolvedBy); issue comments
   → trust set: author + permission lookups for candidate logins (cached per run)
   → Phase A (unchanged; resolved threads are never awaiting)
   → settled = agree-marker threads ∪ trusted-resolution threads

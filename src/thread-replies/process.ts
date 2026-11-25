@@ -94,7 +94,6 @@ export async function processPrReviewWithThreadReplies(
               lookup: repositoryPermissionLookup(options.githubToken, pr),
             },
             threadResult.settled,
-            prContext?.author ?? "",
           );
 
           console.log(`  Reviewing ${pr.prUrl} ...`);
@@ -139,14 +138,12 @@ export interface ReviewMemorySources {
 /**
  * Settled findings plus owner decisions for the review prompt, read after
  * Phase A so unresolves and late replies count; `agreed` are this run's
- * agreements. `author` is empty when PR context failed to load; then only
- * write access counts. Memory is an aid: if loading fails, fall back to
- * agreements only.
+ * agreements. Memory is an aid: if loading fails, fall back to agreements
+ * only.
  */
 export async function loadReviewMemory(
   sources: ReviewMemorySources,
   agreed: SettledFinding[],
-  author: string,
 ): Promise<ReviewMemory> {
   try {
     const [{ login, threads }, issueComments] = await Promise.all([
@@ -155,7 +152,6 @@ export async function loadReviewMemory(
     ]);
     const trusted = await loadTrustedLogins(
       sources.lookup,
-      author,
       trustCandidates(threads, issueComments, login),
       login,
     );

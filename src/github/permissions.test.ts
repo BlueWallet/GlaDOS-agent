@@ -22,7 +22,7 @@ test("write access means admin or write permission, or a write-level role", () =
   }
 });
 
-test("trusted logins are the PR author plus write users, never GLaDOS, bots, or failed lookups", async () => {
+test("trusted logins are write users only, never GLaDOS, bots, or failed lookups", async () => {
   const asked: string[] = [];
   const trusted = await loadTrustedLogins(
     async (login) => {
@@ -30,17 +30,10 @@ test("trusted logins are the PR author plus write users, never GLaDOS, bots, or 
       if (login === "broken") throw new Error("403");
       return { permission: login === "maint" ? "write" : "read" };
     },
-    "Author",
+    // "author" is a read-only PR author: no special trust.
     ["Maint", "maint", "reader", "broken", "GLaDOS", "coderabbitai[bot]", "author", ""],
     "glados",
   );
-  assert.deepEqual([...trusted].sort(), ["author", "maint"]);
-  assert.deepEqual(asked.sort(), ["broken", "maint", "reader"]);
-});
-
-test("a bot or GLaDOS author is not trusted", async () => {
-  const trusted = await loadTrustedLogins(async () => ({ permission: "admin" }), "dependabot[bot]", [], "glados");
-  assert.deepEqual([...trusted], []);
-  const self = await loadTrustedLogins(async () => ({ permission: "admin" }), "GLaDOS", [], "glados");
-  assert.deepEqual([...self], []);
+  assert.deepEqual([...trusted].sort(), ["maint"]);
+  assert.deepEqual(asked.sort(), ["author", "broken", "maint", "reader"]);
 });

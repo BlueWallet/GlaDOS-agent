@@ -40,13 +40,12 @@ export function repositoryPermissionLookup(
 }
 
 /**
- * Lowercase logins whose words count as the owner's: the PR author, and any
- * other login with write access. GLaDOS and bots never count; a lookup that
- * fails counts as untrusted.
+ * Lowercase logins whose words count as the owner's: write, maintain, or
+ * admin access. Being the PR author is not enough. GLaDOS and bots never
+ * count; a lookup that fails counts as untrusted.
  */
 export async function loadTrustedLogins(
   lookup: PermissionLookup,
-  author: string,
   logins: Iterable<string>,
   gladosLogin: string,
 ): Promise<Set<string>> {
@@ -55,13 +54,9 @@ export async function loadTrustedLogins(
     login !== "" && login !== glados && !isBotLogin(login);
 
   const trusted = new Set<string>();
-  const owner = author.toLowerCase();
-  if (eligible(owner)) trusted.add(owner);
-
   const candidates = new Set(
     [...logins].map((login) => login.toLowerCase()).filter(eligible),
   );
-  candidates.delete(owner);
   await Promise.all(
     [...candidates].map(async (login) => {
       try {

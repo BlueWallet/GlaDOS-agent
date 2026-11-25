@@ -444,7 +444,7 @@ test("settled context explains both ways a finding settles", () => {
       createdAt: "2026-01-01T00:00:00Z",
     },
   ]);
-  assert.match(context, /resolved by the PR author or a maintainer/i);
+  assert.match(context, /resolved by a maintainer/i);
   assert.match(context, /Fixed in abc123/);
 });
 
