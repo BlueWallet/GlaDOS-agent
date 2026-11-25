@@ -5,6 +5,7 @@ import {
   formatSettledContext,
   listSettledFindings,
   newestWithinBudget,
+  reopenedAfterAgreement,
   SETTLED_TEXT_MAX_CHARS,
   stripGladosControlMarkers,
   truncateText,
@@ -163,6 +164,12 @@ export function buildReviewMemory(input: {
   const byId = new Map(input.agreed.map((item) => [item.threadId, item]));
   for (const item of listSettledFindings(input.threads, input.gladosLogin, input.trusted)) {
     if (!byId.has(item.threadId)) byId.set(item.threadId, item);
+  }
+  for (const thread of input.threads) {
+    const agreed = byId.get(thread.id)?.settledBy === "agreement";
+    if (agreed && reopenedAfterAgreement(thread, input.gladosLogin, input.trusted)) {
+      byId.delete(thread.id);
+    }
   }
   const settled = [...byId.values()];
   // Drop only replies already shown as a settle reason: the resolver's on a

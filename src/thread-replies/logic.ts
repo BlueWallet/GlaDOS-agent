@@ -443,6 +443,23 @@ export function formatReplyBody(
   return `${text}\n\n${replyMarker}`;
 }
 
+/** A trusted human replied after GLaDOS's agreement: the issue is open again. */
+export function reopenedAfterAgreement(
+  thread: ReviewThread,
+  gladosLogin: string,
+  trusted: ReadonlySet<string>,
+): boolean {
+  const agreement = findAgreementComment(thread, gladosLogin);
+  if (!agreement) return false;
+  const glados = gladosLogin.toLowerCase();
+  return thread.comments
+    .slice(thread.comments.indexOf(agreement) + 1)
+    .some((comment) => {
+      const login = comment.authorLogin.toLowerCase();
+      return login !== glados && !comment.authorIsBot && trusted.has(login);
+    });
+}
+
 function findAgreementComment(
   thread: ReviewThread,
   gladosLogin: string,

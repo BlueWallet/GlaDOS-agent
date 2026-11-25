@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ReviewThread, ReviewThreadComment } from "../github/threads.js";
-import { AGREE_MARKER, formatReplyBody, type SettledFinding } from "./logic.js";
+import { AGREE_MARKER, formatReplyBody, listSettledFindings, type SettledFinding } from "./logic.js";
 import {
   buildReviewMemory,
   trustCandidates,
@@ -291,7 +291,7 @@ test("unsettled GLaDOS findings carry their severity into context, not into supp
   assert.deepEqual(memory.settled.map((item) => item.threadId), ["PRRT_2"]);
 });
 
-test("trusted replies on an agreed thread stay owner decisions; the agreement does not", () => {
+test("a trusted reply after an agreement reopens it; replies stay owner decisions, the agreement does not", () => {
   const memory = buildReviewMemory({
     threads: [
       thread("PRRT_1", [
@@ -306,9 +306,25 @@ test("trusted replies on an agreed thread stay owner decisions; the agreement do
     issueComments: [],
     trusted: new Set(["alice", "bob"]),
   });
-  assert.deepEqual(memory.settled.map((item) => item.settledBy), ["agreement"]);
+  // A trusted reply after the agreement reopens it: not suppressed, shown as open.
+  assert.deepEqual(memory.settled, []);
+  assert.match(memory.context, /BEGIN_UNTRUSTED_OPEN_FINDINGS[\s\S]*pays the wrong output/);
   const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
   assert.match(decisions, /change output is first/);
   assert.match(decisions, /still pays the wrong output/);
   assert.doesNotMatch(decisions, /Fine, agreed/);
+});
+
+test("an agreement passed in from this run is reopened by a later trusted reply too", () => {
+  const agreedThread = thread("PRRT_1", [
+    threadComment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z"),
+    threadComment("2", "alice", "Intentional.", "2026-01-02T00:00:00Z"),
+    threadComment("3", glados, formatReplyBody("agree", "Agreed.", "2"), "2026-01-03T00:00:00Z"),
+  ]);
+  const agreed = listSettledFindings([agreedThread], glados);
+  const later = { ...agreedThread, comments: [...agreedThread.comments, threadComment("4", "bob", "Still wrong.", "2026-01-04T00:00:00Z")] };
+  const keep = buildReviewMemory({ threads: [agreedThread], gladosLogin: glados, agreed, issueComments: [], trusted: new Set(["alice", "bob"]) });
+  assert.equal(keep.settled.length, 1);
+  const reopened = buildReviewMemory({ threads: [later], gladosLogin: glados, agreed, issueComments: [], trusted: new Set(["alice", "bob"]) });
+  assert.deepEqual(reopened.settled, []);
 });
