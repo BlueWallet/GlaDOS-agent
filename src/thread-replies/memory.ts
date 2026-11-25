@@ -22,10 +22,6 @@ export interface ConversationComment {
 
 export const OWNER_COMMENT_MAX_CHARS = 1_500;
 export const OWNER_DECISIONS_MAX_CHARS = 12_000;
-export const EARLIER_FINDING_MAX_CHARS = 600;
-export const EARLIER_FINDINGS_MAX_CHARS = 8_000;
-
-const SEVERITY_TAG = /^\s*\*\*\[(CRITICAL|HIGH|MEDIUM|LOW)\]\*\*\s*/i;
 
 /** Replies (never roots) on every review thread, tagged with the thread path. */
 export function threadReplies(threads: ReviewThread[]): ConversationComment[] {
@@ -83,40 +79,6 @@ export function formatOwnerDecisions(comments: ConversationComment[]): string {
     "BEGIN_UNTRUSTED_OWNER_DECISIONS",
     ...entries,
     "END_UNTRUSTED_OWNER_DECISIONS",
-  ].join("\n");
-}
-
-/** GLaDOS root findings that are not settled, newest kept within budget. */
-export function formatEarlierFindings(
-  threads: ReviewThread[],
-  settled: SettledFinding[],
-  gladosLogin: string,
-): string {
-  const glados = gladosLogin.toLowerCase();
-  const settledIds = new Set(settled.map((item) => item.threadId));
-  const roots = threads
-    .filter((thread) => !settledIds.has(thread.id))
-    .flatMap((thread) => {
-      const root = thread.comments[0];
-      if (!root || root.authorLogin.toLowerCase() !== glados) return [];
-      return [{ thread, root }];
-    })
-    .sort((a, b) => Date.parse(a.root.createdAt) - Date.parse(b.root.createdAt));
-
-  const entries = newestWithinBudget(roots, EARLIER_FINDINGS_MAX_CHARS, ({ thread, root }) => {
-    const body = stripGladosControlMarkers(root.body);
-    const severity = body.match(SEVERITY_TAG)?.[1]?.toUpperCase() ?? "UNKNOWN";
-    const text = truncateText(body.replace(SEVERITY_TAG, ""), EARLIER_FINDING_MAX_CHARS);
-    const loc = thread.line != null ? `${thread.path}:${thread.line}` : thread.path;
-    const state = thread.isResolved ? "resolved" : "open";
-    return `- [${severity}] \`${loc}\` (${state}): ${encodeUntrustedPromptData(text)}`;
-  });
-  if (entries.length === 0) return "";
-  return [
-    "Your earlier findings on this PR that are not settled, oldest first. They do not suppress anything: re-raise one only if it still applies to the current code, and keep its earlier severity unless the code there got worse.",
-    "BEGIN_UNTRUSTED_EARLIER_FINDINGS",
-    ...entries,
-    "END_UNTRUSTED_EARLIER_FINDINGS",
   ].join("\n");
 }
 
@@ -194,7 +156,6 @@ export function buildReviewMemory(input: {
     context: formatReviewMemory([
       formatSettledContext(settled),
       formatOwnerDecisions(decisions),
-      formatEarlierFindings(input.threads, settled, input.gladosLogin),
     ]),
   };
 }

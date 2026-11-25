@@ -5,7 +5,6 @@ import { AGREE_MARKER, type SettledFinding } from "./logic.js";
 import {
   buildReviewMemory,
   trustCandidates,
-  formatEarlierFindings,
   formatOwnerDecisions,
   formatReviewMemory,
   OWNER_COMMENT_MAX_CHARS,
@@ -110,33 +109,6 @@ test("thread replies skip roots and carry the thread path", () => {
   );
 });
 
-test("earlier findings list unsettled GLaDOS roots with their severity", () => {
-  const settled: SettledFinding[] = [
-    {
-      threadId: "PRRT_2",
-      path: "src/a.ts",
-      line: 3,
-      originalBody: "x",
-      agreementBody: "y",
-      settledBy: "resolution",
-    },
-  ];
-  const text = formatEarlierFindings(
-    [
-      thread("PRRT_1", [threadComment("1", glados, "**[MEDIUM]** Open <issue>.", "2026-01-01T00:00:00Z")]),
-      thread("PRRT_2", [threadComment("2", glados, "**[HIGH]** Settled issue.", "2026-01-01T00:00:00Z")]),
-      thread("PRRT_3", [threadComment("3", "bob", "**[HIGH]** Human note.", "2026-01-01T00:00:00Z")]),
-    ],
-    settled,
-    glados,
-  );
-  assert.match(text, /\[MEDIUM\]/);
-  assert.match(text, /Open \\u003cissue\\u003e/);
-  assert.doesNotMatch(text, /Settled issue|Human note/);
-  assert.match(text, /keep its earlier severity unless the code there got worse/i);
-  assert.equal(formatEarlierFindings([], [], glados), "");
-});
-
 test("review memory joins only non-empty parts", () => {
   assert.equal(formatReviewMemory(["", "a", "", "b"]), "a\n\nb");
   assert.equal(formatReviewMemory(["", ""]), "");
@@ -193,8 +165,7 @@ test("review memory merges agreements with trusted resolutions and builds one co
   );
   assert.match(memory.context, /Declined: request-scoped/);
   assert.match(memory.context, /parity with hot sends/);
-  assert.match(memory.context, /Still open/);
-  assert.doesNotMatch(memory.context, /EARLIER_FINDINGS[\s\S]*cacheKey/);
+  assert.doesNotMatch(memory.context, /Still open/);
 });
 
 test("owner decisions skip replies already shown as a settled reason", () => {
