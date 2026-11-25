@@ -172,15 +172,16 @@ export function buildReviewMemory(input: {
     if (!loaded.has(item.threadId)) byId.set(item.threadId, item);
   }
   const settled = [...byId.values()];
-  // Drop only replies already shown as a settle reason: the resolver's on a
-  // resolved thread. GLaDOS's own agreement never counts as an owner decision.
+  // Drop only the reply already shown as a settle reason: the resolver's latest
+  // on a resolved thread. GLaDOS's own agreement never counts as an owner decision.
   const decisionThreads = input.threads.map((thread) => {
     if (byId.get(thread.id)?.settledBy !== "resolution") return thread;
     const resolver = thread.resolvedByLogin?.toLowerCase();
-    const comments = thread.comments.filter(
-      (comment, index) => index === 0 || comment.authorLogin.toLowerCase() !== resolver,
-    );
-    return { ...thread, comments };
+    const reason = thread.comments
+      .slice(1)
+      .filter((comment) => comment.authorLogin.toLowerCase() === resolver)
+      .at(-1);
+    return { ...thread, comments: thread.comments.filter((comment) => comment !== reason) };
   });
   const decisions = selectOwnerDecisions(
     [...input.issueComments, ...threadReplies(decisionThreads)],

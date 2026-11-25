@@ -328,3 +328,26 @@ test("an agreement passed in from this run is reopened by a later trusted reply 
   const reopened = buildReviewMemory({ threads: [later], gladosLogin: glados, agreed, issueComments: [], trusted: new Set(["alice", "bob"]) });
   assert.deepEqual(reopened.settled, []);
 });
+
+test("only the resolver reply used as the settle reason leaves owner decisions", () => {
+  const memory = buildReviewMemory({
+    threads: [
+      thread(
+        "PRRT_1",
+        [
+          threadComment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z"),
+          threadComment("2", "alice", "Won't fix: must match the legacy signer.", "2026-01-02T00:00:00Z"),
+          threadComment("3", "alice", "Resolving.", "2026-01-03T00:00:00Z"),
+        ],
+        { isResolved: true, resolvedByLogin: "alice" },
+      ),
+    ],
+    gladosLogin: glados,
+    agreed: [],
+    issueComments: [],
+    trusted: new Set(["alice"]),
+  });
+  const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
+  assert.match(decisions, /legacy signer/);
+  assert.doesNotMatch(decisions, /Resolving\./);
+});
