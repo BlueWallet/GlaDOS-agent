@@ -196,3 +196,23 @@ test("review memory merges agreements with trusted resolutions and builds one co
   assert.match(memory.context, /Still open/);
   assert.doesNotMatch(memory.context, /EARLIER_FINDINGS[\s\S]*cacheKey/);
 });
+
+test("owner decisions skip replies already shown as a settled reason", () => {
+  const root = threadComment("1", glados, "**[HIGH]** `cacheKey` ignores `userId`.", "2026-01-01T00:00:00Z");
+  const memory = buildReviewMemory({
+    threads: [
+      thread("PRRT_1", [root, threadComment("2", "alice", "Fixed in abc.", "2026-01-02T00:00:00Z")], {
+        isResolved: true,
+        resolvedByLogin: "alice",
+      }),
+      thread("PRRT_2", [{ ...root, id: "3" }, threadComment("4", "alice", "Declined: by design.", "2026-01-03T00:00:00Z")]),
+    ],
+    gladosLogin: glados,
+    agreed: [],
+    issueComments: [],
+    trusted: new Set(["alice"]),
+  });
+  const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
+  assert.match(decisions, /Declined: by design/);
+  assert.doesNotMatch(decisions, /Fixed in abc/);
+});

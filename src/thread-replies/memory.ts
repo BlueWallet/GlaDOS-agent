@@ -141,7 +141,6 @@ function newestWithinBudget<T>(
   return kept.reverse();
 }
 
-
 /**
  * Logins whose trust matters: resolvers of GLaDOS threads, and human authors
  * of thread replies and conversation comments.
@@ -183,8 +182,10 @@ export function buildReviewMemory(input: {
     if (!byId.has(item.threadId)) byId.set(item.threadId, item);
   }
   const settled = [...byId.values()];
+  // A settled thread's reply is already its "why it was settled" line.
+  const openThreads = input.threads.filter((thread) => !byId.has(thread.id));
   const decisions = selectOwnerDecisions(
-    [...input.issueComments, ...threadReplies(input.threads)],
+    [...input.issueComments, ...threadReplies(openThreads)],
     input.trusted,
     input.gladosLogin,
   );
