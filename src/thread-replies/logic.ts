@@ -13,7 +13,7 @@ export interface SettledFinding {
   path: string;
   line: number | null;
   originalBody: string;
-  /** Why it settled: GLaDOS's agreement, or the latest trusted reply on a trusted resolution. */
+  /** Why it settled: GLaDOS's agreement, or the resolver's own latest reply on a trusted resolution. */
   agreementBody: string;
   settledBy: "agreement" | "resolution";
   /** When GLaDOS raised it (root comment); orders memory oldest first. */
@@ -157,9 +157,10 @@ export function listSettledFindings(
     ) {
       continue;
     }
+    // Only the resolver speaks for the resolution; other trusted replies stay owner decisions.
     const reply = thread.comments
       .slice(1)
-      .filter((comment) => trusted.has(comment.authorLogin.toLowerCase()))
+      .filter((comment) => comment.authorLogin.toLowerCase() === resolver)
       .at(-1);
     settled.push({
       ...base,

@@ -236,3 +236,27 @@ test("bot resolvers are not trust candidates", () => {
   );
   assert.equal(candidates.has("deploy-app"), false);
 });
+
+test("a later trusted reply on a resolved thread stays an owner decision", () => {
+  const root = threadComment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z");
+  const memory = buildReviewMemory({
+    threads: [
+      thread(
+        "PRRT_1",
+        [
+          root,
+          threadComment("2", "alice", "Fixed in abc.", "2026-01-02T00:00:00Z"),
+          threadComment("3", "bob", "This still pays the wrong output.", "2026-01-03T00:00:00Z"),
+        ],
+        { isResolved: true, resolvedByLogin: "alice" },
+      ),
+    ],
+    gladosLogin: glados,
+    agreed: [],
+    issueComments: [],
+    trusted: new Set(["alice", "bob"]),
+  });
+  const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
+  assert.match(decisions, /still pays the wrong output/);
+  assert.doesNotMatch(decisions, /Fixed in abc/);
+});

@@ -613,3 +613,15 @@ test("settled budget counts the encoded size", () => {
   const context = formatSettledContext(heavy);
   assert.ok(context.length <= 16_000 + 2_000, `context is ${context.length} chars`);
 });
+
+test("the settle reason is the resolver's own reply, not a later trusted one", () => {
+  const root = comment("1", glados, "**[HIGH]** pays the wrong output.", "2026-01-01T00:00:00Z");
+  const fixed = comment("2", "alice", "Fixed in abc.", "2026-01-02T00:00:00Z");
+  const objection = comment("3", "bob", "This still pays the wrong output.", "2026-01-03T00:00:00Z");
+  const trusted = new Set(["alice", "bob"]);
+  const resolved = { isResolved: true, resolvedByLogin: "alice" };
+  const [withReply] = listSettledFindings([thread([root, fixed, objection], resolved)], glados, trusted);
+  assert.equal(withReply!.agreementBody, "Fixed in abc.");
+  const [silent] = listSettledFindings([thread([root, objection], resolved)], glados, trusted);
+  assert.equal(silent!.agreementBody, "Resolved by @alice.");
+});
