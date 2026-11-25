@@ -101,7 +101,7 @@ export function trustCandidates(
   const logins = new Set<string>();
   for (const thread of threads) {
     const rootByGlados = thread.comments[0]?.authorLogin.toLowerCase() === glados;
-    if (rootByGlados && thread.isResolved && thread.resolvedByLogin) {
+    if (rootByGlados && thread.isResolved && thread.resolvedByLogin && !thread.resolvedByIsBot) {
       logins.add(thread.resolvedByLogin);
     }
   }

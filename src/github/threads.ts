@@ -21,6 +21,8 @@ export interface ReviewThread {
   line: number | null;
   /** Login of whoever resolved the thread; null while unresolved. */
   resolvedByLogin: string | null;
+  /** The schema types resolvedBy as User; checked anyway so a bot actor never settles a thread. */
+  resolvedByIsBot: boolean;
   comments: ReviewThreadComment[];
 }
 
@@ -45,7 +47,7 @@ interface GqlThread {
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
-  resolvedBy: { login: string } | null;
+  resolvedBy: { __typename?: string; login: string } | null;
   comments: {
     pageInfo: PageInfo;
     nodes: GqlComment[];
@@ -93,7 +95,7 @@ export async function listReviewThreads(
                 viewerCanResolve
                 path
                 line
-                resolvedBy { login }
+                resolvedBy { __typename login }
                 comments(first: 50) {
                   pageInfo { hasNextPage endCursor }
                   nodes {
@@ -150,7 +152,7 @@ export async function getReviewThread(
           viewerCanResolve
           path
           line
-          resolvedBy { login }
+          resolvedBy { __typename login }
           comments(first: 50) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -180,6 +182,7 @@ async function materializeThread(
     path: node.path,
     line: node.line,
     resolvedByLogin: node.resolvedBy?.login ?? null,
+    resolvedByIsBot: node.resolvedBy?.__typename === "Bot",
     comments: await loadAllComments(octokit, node),
   };
 }

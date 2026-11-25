@@ -151,6 +151,7 @@ export function listSettledFindings(
     if (
       !thread.isResolved ||
       !resolver ||
+      thread.resolvedByIsBot ||
       !trusted.has(resolver) ||
       root.authorLogin.toLowerCase() !== login
     ) {

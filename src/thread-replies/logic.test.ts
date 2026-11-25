@@ -48,6 +48,7 @@ function thread(
     path: "src/example.ts",
     line: 12,
     resolvedByLogin: null,
+    resolvedByIsBot: false,
     comments,
     ...overrides,
   };
@@ -591,4 +592,10 @@ test("suppressing every finding says so in the summary", () => {
   );
   assert.deepEqual(filtered.findings, []);
   assert.match(filtered.summary, /1 finding repeated a settled issue/);
+});
+
+test("a bot that resolves a thread never settles it, even with a trusted login", () => {
+  const root = comment("1", glados, "**[HIGH]** `cacheKey` ignores `userId`.", "2026-01-01T00:00:00Z");
+  const resolved = thread([root], { isResolved: true, resolvedByLogin: "deploy-app", resolvedByIsBot: true });
+  assert.deepEqual(listSettledFindings([resolved], glados, new Set(["deploy-app"])), []);
 });
