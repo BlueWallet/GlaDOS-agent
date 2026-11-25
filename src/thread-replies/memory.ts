@@ -4,6 +4,7 @@ import {
   encodeUntrustedPromptData,
   formatSettledContext,
   listSettledFindings,
+  newestWithinBudget,
   stripGladosControlMarkers,
   truncateText,
   type SettledFinding,
@@ -63,8 +64,9 @@ export function selectOwnerDecisions(
 }
 
 export function formatOwnerDecisions(comments: ConversationComment[]): string {
+  // `comments` come oldest first from selectOwnerDecisions().
   const entries = newestWithinBudget(
-    [...comments].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+    comments,
     OWNER_DECISIONS_MAX_CHARS,
     (comment) => {
       const where = comment.path ? ` on \`${comment.path}\`` : "";
@@ -84,23 +86,6 @@ export function formatOwnerDecisions(comments: ConversationComment[]): string {
 
 export function formatReviewMemory(parts: string[]): string {
   return parts.filter((part) => part !== "").join("\n\n");
-}
-
-/** Format items newest first until the budget is spent; return oldest first. */
-function newestWithinBudget<T>(
-  oldestFirst: T[],
-  budget: number,
-  format: (item: T) => string,
-): string[] {
-  const kept: string[] = [];
-  let used = 0;
-  for (const item of [...oldestFirst].reverse()) {
-    const line = format(item);
-    if (used + line.length > budget) break;
-    kept.push(line);
-    used += line.length + 1;
-  }
-  return kept.reverse();
 }
 
 /**

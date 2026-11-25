@@ -518,8 +518,9 @@ test("settled context is bounded per finding and in total", () => {
   }));
   const context = formatSettledContext(many);
   assert.ok(context.length <= SETTLED_CONTEXT_MAX_CHARS + 1000, String(context.length));
-  assert.match(context, /finding-0 /);
-  assert.match(context, /more settled finding\(s\) omitted/);
+  assert.match(context, /finding-59 /);
+  assert.doesNotMatch(context, /finding-0 /);
+  assert.ok(context.indexOf("finding-58 ") < context.indexOf("finding-59 "));
 });
 
 test("a trusted resolution never uses an untrusted reply as its reason", () => {
