@@ -336,7 +336,8 @@ export function suppressSettledFindings(
       if (finding.path !== item.path) return false;
       return (
         normalizeFindingBody(finding.body) ===
-        normalizeFindingBody(item.originalBody)
+          normalizeFindingBody(item.originalBody) ||
+        sameTopic(finding.body, item.originalBody)
       );
     });
   });
@@ -348,6 +349,38 @@ export function suppressSettledFindings(
       ? "The disputed test result stays retired. No new defects survived examination."
       : `The settled test result stays retired. ${count} new defect${count === 1 ? "" : "s"} remain below for continued testing.`;
   return { summary, findings };
+}
+
+const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
+const CODE_WORD = /[A-Za-z_][\w.]*\w/g;
+const CODE_SHAPED = /[a-z][A-Z]|_|\./;
+
+/**
+ * Code identifiers a finding talks about: everything inside backtick spans,
+ * plus camelCase, snake_case, and dotted words outside them. Lowercased,
+ * at least 3 characters. Prose words do not count.
+ */
+export function codeTopics(text: string): Set<string> {
+  const topics = new Set<string>();
+  const add = (fragment: string) => {
+    for (const word of fragment.match(IDENTIFIER) ?? []) {
+      if (word.length >= 3) topics.add(word.toLowerCase());
+    }
+  };
+  for (const span of text.matchAll(/`([^`]+)`/g)) add(span[1]!);
+  for (const word of text.replace(/`[^`]*`/g, " ").match(CODE_WORD) ?? []) {
+    if (CODE_SHAPED.test(word)) add(word);
+  }
+  return topics;
+}
+
+/** Same topic: at least 2 shared identifiers covering 60% of the smaller set. */
+function sameTopic(a: string, b: string): boolean {
+  const left = codeTopics(a);
+  const right = codeTopics(b);
+  let shared = 0;
+  for (const topic of left) if (right.has(topic)) shared += 1;
+  return shared >= 2 && shared / Math.min(left.size, right.size) >= 0.6;
 }
 
 /** Format reply body for GitHub; append agree marker when agreeing. */

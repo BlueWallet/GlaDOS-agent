@@ -10,6 +10,7 @@ import {
   AGREE_MARKER,
   assertCurrentThreadSnapshots,
   buildThreadReplyPrompt,
+  codeTopics,
   formatReplyBody,
   formatSettledContext,
   isAwaitingThread,
@@ -264,7 +265,7 @@ test("snapshot validation rejects an edited comment with the same id", () => {
   );
 });
 
-test("settled findings are removed deterministically by anchor or exact issue text", () => {
+test("settled findings are removed by path and exact issue text or code topic", () => {
   const settled: SettledFinding[] = [
     {
       threadId: "PRRT_1",
@@ -439,4 +440,68 @@ test("settled context explains both ways a finding settles", () => {
   ]);
   assert.match(context, /resolved by the PR author or a maintainer/i);
   assert.match(context, /Fixed in abc123/);
+});
+
+test("code topics come from backtick spans and code-shaped words", () => {
+  const topics = codeTopics(
+    "`Psbt.read(scanned).right` returns `Left`; inputSignatures runs after, so the scan fails.",
+  );
+  for (const topic of ["psbt", "read", "scanned", "right", "left", "inputsignatures"]) {
+    assert.equal(topics.has(topic), true, topic);
+  }
+  assert.equal(topics.has("scan"), false);
+  assert.equal(topics.has("fails"), false);
+});
+
+const settledPsbt: SettledFinding = {
+  threadId: "PRRT_9",
+  path: "src/SignedPsbt.kt",
+  line: 80,
+  originalBody:
+    "**[MEDIUM]** Oh, splendid. `Psbt.read(scanned).right` collapses to `theirs == null`, and `inputSignatures` only runs after that read.",
+  agreementBody: "Follow-up for a separate PR.",
+  settledBy: "resolution",
+};
+
+test("a reworded repeat of a settled finding on the same file is suppressed", () => {
+  const filtered = suppressSettledFindings(
+    {
+      summary: "s",
+      findings: [
+        {
+          severity: "medium",
+          path: "src/SignedPsbt.kt",
+          line: 77,
+          body: "When Psbt.read fails, theirs is null before inputSignatures can read the raw maps.",
+        },
+      ],
+    },
+    [settledPsbt],
+  );
+  assert.deepEqual(filtered.findings, []);
+});
+
+test("topic suppression keeps new topics, other files, and single shared identifiers", () => {
+  const findings: ReviewPayload["findings"] = [
+    {
+      severity: "high",
+      path: "src/SignedPsbt.kt",
+      line: 120,
+      body: "`finalTx` accepts an empty `scriptWitness` as signed.",
+    },
+    {
+      severity: "high",
+      path: "src/Other.kt",
+      line: 80,
+      body: "`Psbt.read(scanned)` collapses and `inputSignatures` never runs.",
+    },
+    {
+      severity: "high",
+      path: "src/SignedPsbt.kt",
+      line: 90,
+      body: "`inputSignatures` maps an empty value to a signature.",
+    },
+  ];
+  const filtered = suppressSettledFindings({ summary: "s", findings }, [settledPsbt]);
+  assert.deepEqual(filtered.findings, findings);
 });
