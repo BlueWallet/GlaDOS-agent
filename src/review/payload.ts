@@ -261,7 +261,7 @@ export function buildVerifyPrompt(
     ...SEVERITY_RUBRIC,
     "",
     "Critical and high candidates are blockers. Judge their severity by the rubric above.",
-    "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read. If in doubt, keep it at its draft severity.",
+    "Drop a critical or high candidate, or lower it below high, only with concrete disproof from code you read, or from the PR's stated goal when it is out of scope or pre-existing. If in doubt, keep it at its draft severity.",
     "List every dropped candidate in \"dropped\" with evidence: the file and what the code there shows. A critical or high candidate dropped without evidence is restored.",
     "When you keep a critical or high candidate but lower it below high, put the same kind of evidence in that finding's \"evidence\". Without it the draft severity stays.",
     "When a kept finding's only impact is user-facing text, wording, or docs, set \"messageOnly\": true and lower it to low; no evidence is needed for that. Omit \"messageOnly\" otherwise.",

@@ -155,7 +155,7 @@ export function listSettledFindings(
     }
     const reply = thread.comments
       .slice(1)
-      .filter((comment) => comment.authorLogin.toLowerCase() !== login)
+      .filter((comment) => trusted.has(comment.authorLogin.toLowerCase()))
       .at(-1);
     settled.push({
       ...base,

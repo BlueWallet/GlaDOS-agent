@@ -104,6 +104,7 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /wrong error message .* is low/i);
   assert.match(prompt, /deliberately reuses an existing code path/i);
   assert.match(prompt, /out of scope for the PR's stated goal/i);
+  assert.match(prompt, /only with concrete disproof from code you read, or from the PR's stated goal/i);
   assert.doesNotMatch(prompt, /test gaps for changed behavior are valid high/i);
   assert.doesNotMatch(prompt, /did not worsen or depend on/i);
 });
