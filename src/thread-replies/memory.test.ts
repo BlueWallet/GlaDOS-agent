@@ -169,7 +169,9 @@ test("review memory merges agreements with trusted resolutions and builds one co
   assert.ok(memory.context.indexOf("PRRT_1") < memory.context.indexOf("PRRT_9"));
   assert.match(memory.context, /Declined: request-scoped/);
   assert.match(memory.context, /parity with hot sends/);
-  assert.doesNotMatch(memory.context, /Still open/);
+  const settledBlock = memory.context.slice(0, memory.context.indexOf("END_UNTRUSTED_SETTLED_FINDINGS"));
+  assert.doesNotMatch(settledBlock, /Still open/);
+  assert.match(memory.context, /BEGIN_UNTRUSTED_OPEN_FINDINGS[\s\S]*Still open/);
 });
 
 test("owner decisions skip replies already shown as a settled reason", () => {
@@ -260,4 +262,31 @@ test("a later trusted reply on a resolved thread stays an owner decision", () =>
   const decisions = memory.context.slice(memory.context.indexOf("BEGIN_UNTRUSTED_OWNER_DECISIONS"));
   assert.match(decisions, /still pays the wrong output/);
   assert.doesNotMatch(decisions, /Fixed in abc/);
+});
+
+test("unsettled GLaDOS findings carry their severity into context, not into suppression", () => {
+  const open = threadComment("1", glados, "**[MEDIUM]** `feeRate` is rounded twice.", "2026-01-01T00:00:00Z");
+  const settledRoot = threadComment("3", glados, "**[HIGH]** `cacheKey` ignores `userId`.", "2026-01-01T00:00:00Z");
+  const human = threadComment("5", "alice", "Human root note.", "2026-01-01T00:00:00Z");
+  const memory = buildReviewMemory({
+    threads: [
+      thread("PRRT_1", [open, threadComment("2", "alice", "Disagree.", "2026-01-02T00:00:00Z")]),
+      thread("PRRT_2", [settledRoot, threadComment("4", "alice", "Fixed.", "2026-01-02T00:00:00Z")], {
+        isResolved: true,
+        resolvedByLogin: "alice",
+      }),
+      thread("PRRT_3", [human]),
+    ],
+    gladosLogin: glados,
+    agreed: [],
+    issueComments: [],
+    trusted: new Set(["alice"]),
+  });
+  const start = memory.context.indexOf("BEGIN_UNTRUSTED_OPEN_FINDINGS");
+  assert.ok(start >= 0);
+  const block = memory.context.slice(start, memory.context.indexOf("END_UNTRUSTED_OPEN_FINDINGS"));
+  assert.match(block, /\*\*\[MEDIUM\]\*\* `feeRate` is rounded twice/);
+  assert.doesNotMatch(block, /cacheKey|Human root note/);
+  assert.match(memory.context, /keep that severity unless the code there got worse/);
+  assert.deepEqual(memory.settled.map((item) => item.threadId), ["PRRT_2"]);
 });
