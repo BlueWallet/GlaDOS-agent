@@ -13,6 +13,7 @@ import { listIssueComments } from "../github/comments.js";
 import {
   loadTrustedLogins,
   repositoryPermissionLookup,
+  type PermissionLookup,
 } from "../github/permissions.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
@@ -24,6 +25,7 @@ import { runThreadReplies } from "./agent.js";
 import {
   buildReviewMemory,
   trustCandidates,
+  type ConversationComment,
   type ReviewMemory,
 } from "./memory.js";
 import {
@@ -42,8 +44,6 @@ import {
 export interface ThreadProcessResult {
   settled: SettledFinding[];
   complete: boolean;
-  /** Thread state Phase A started from; review memory is built from it. */
-  state: ThreadState;
 }
 
 interface ThreadState {
@@ -88,9 +88,12 @@ export async function processPrReviewWithThreadReplies(
 
           const prContext = await tryLoadPrContext(options.githubToken, pr, repoDir);
           const memory = await loadReviewMemory(
-            options.githubToken,
-            pr,
-            threadResult,
+            {
+              threads: () => loadThreadState(options.githubToken, pr),
+              issueComments: () => listIssueComments(options.githubToken, pr),
+              lookup: repositoryPermissionLookup(options.githubToken, pr),
+            },
+            threadResult.settled,
             prContext?.author ?? "",
           );
 
@@ -127,33 +130,36 @@ export async function processPrReviewWithThreadReplies(
   }
 }
 
+export interface ReviewMemorySources {
+  threads: () => Promise<ThreadState>;
+  issueComments: () => Promise<ConversationComment[]>;
+  lookup: PermissionLookup;
+}
+
 /**
- * Settled findings plus owner decisions for the review prompt. `author` is
- * empty when PR context failed to load; then only write access counts.
- * Memory is an aid: if loading it fails, fall back to agreements only.
+ * Settled findings plus owner decisions for the review prompt, read after
+ * Phase A so unresolves and late replies count; `agreed` are this run's
+ * agreements. `author` is empty when PR context failed to load; then only
+ * write access counts. Memory is an aid: if loading fails, fall back to
+ * agreements only.
  */
-async function loadReviewMemory(
-  githubToken: string,
-  pr: PullRequestRef,
-  threadResult: ThreadProcessResult,
+export async function loadReviewMemory(
+  sources: ReviewMemorySources,
+  agreed: SettledFinding[],
   author: string,
 ): Promise<ReviewMemory> {
-  const { login, threads } = threadResult.state;
   try {
-    const issueComments = await listIssueComments(githubToken, pr);
+    const [{ login, threads }, issueComments] = await Promise.all([
+      sources.threads(),
+      sources.issueComments(),
+    ]);
     const trusted = await loadTrustedLogins(
-      repositoryPermissionLookup(githubToken, pr),
+      sources.lookup,
       author,
       trustCandidates(threads, issueComments, login),
       login,
     );
-    const memory = buildReviewMemory({
-      threads,
-      gladosLogin: login,
-      agreed: threadResult.settled,
-      issueComments,
-      trusted,
-    });
+    const memory = buildReviewMemory({ threads, gladosLogin: login, agreed, issueComments, trusted });
     console.log(
       `  Review memory: ${memory.settled.length} settled finding(s), ${trusted.size} trusted login(s), ${memory.context.length} chars`,
     );
@@ -161,10 +167,7 @@ async function loadReviewMemory(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`  Review memory unavailable, using agreements only: ${message}`);
-    return {
-      settled: threadResult.settled,
-      context: formatSettledContext(threadResult.settled),
-    };
+    return { settled: agreed, context: formatSettledContext(agreed) };
   }
 }
 
@@ -238,7 +241,7 @@ async function processThreadState(
   );
   if (awaiting.length === 0) {
     console.log("  No review threads awaiting a reply");
-    return { settled: [...settledById.values()], complete, state };
+    return { settled: [...settledById.values()], complete };
   }
   if (!options.repoDir) {
     throw new Error("Thread replies require a prepared PR workspace");
@@ -287,7 +290,7 @@ async function processThreadState(
     if (!result.complete) complete = false;
   }
 
-  return { settled: [...settledById.values()], complete, state };
+  return { settled: [...settledById.values()], complete };
 }
 
 async function retryPendingResolutions(
