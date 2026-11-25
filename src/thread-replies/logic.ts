@@ -13,7 +13,9 @@ export interface SettledFinding {
   path: string;
   line: number | null;
   originalBody: string;
+  /** Why it settled: GLaDOS's agreement, or the latest human reply on a trusted resolution. */
   agreementBody: string;
+  settledBy: "agreement" | "resolution";
 }
 
 export interface ThreadReplyDecision {
@@ -113,22 +115,54 @@ export function isAwaitingThread(
     .some((comment) => comment.authorLogin.toLowerCase() !== login);
 }
 
+/**
+ * Settled = GLaDOS agreed on the thread, or a trusted user (PR author or
+ * write access; lowercase logins in `trusted`) resolved a GLaDOS thread.
+ */
 export function listSettledFindings(
   threads: ReviewThread[],
   gladosLogin: string,
+  trusted: ReadonlySet<string> = new Set(),
 ): SettledFinding[] {
+  const login = gladosLogin.toLowerCase();
   const settled: SettledFinding[] = [];
   for (const thread of threads) {
-    const agreement = findAgreementComment(thread, gladosLogin);
-    if (!agreement) continue;
     const root = thread.comments[0];
     if (!root) continue;
-    settled.push({
+    const base = {
       threadId: thread.id,
       path: thread.path,
       line: thread.line,
       originalBody: root.body,
-      agreementBody: stripGladosControlMarkers(agreement.body),
+    };
+    const agreement = findAgreementComment(thread, gladosLogin);
+    if (agreement) {
+      settled.push({
+        ...base,
+        agreementBody: stripGladosControlMarkers(agreement.body),
+        settledBy: "agreement",
+      });
+      continue;
+    }
+    const resolver = thread.resolvedByLogin?.toLowerCase();
+    if (
+      !thread.isResolved ||
+      !resolver ||
+      !trusted.has(resolver) ||
+      root.authorLogin.toLowerCase() !== login
+    ) {
+      continue;
+    }
+    const reply = thread.comments
+      .slice(1)
+      .filter((comment) => comment.authorLogin.toLowerCase() !== login)
+      .at(-1);
+    settled.push({
+      ...base,
+      agreementBody: reply
+        ? stripGladosControlMarkers(reply.body)
+        : `Resolved by @${thread.resolvedByLogin}.`,
+      settledBy: "resolution",
     });
   }
   return settled;
@@ -138,7 +172,7 @@ export function formatSettledContext(settled: SettledFinding[]): string {
   if (settled.length === 0) return "";
 
   const lines = [
-    "The following findings were previously raised by you and you AGREED with the author's clarification. Do NOT re-raise these issues for this PR, even if the code still looks the same:",
+    "The following findings were previously raised by you and are settled: either you AGREED with the author's clarification, or the thread was resolved by the PR author or a maintainer. Do NOT re-raise these issues for this PR, even reworded and even if the code still looks the same:",
     "",
   ];
   for (const item of settled) {

@@ -17,6 +17,8 @@ export interface ReviewThread {
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
+  /** Login of whoever resolved the thread; null while unresolved. */
+  resolvedByLogin: string | null;
   comments: ReviewThreadComment[];
 }
 
@@ -41,6 +43,7 @@ interface GqlThread {
   viewerCanResolve: boolean;
   path: string;
   line: number | null;
+  resolvedBy: { login: string } | null;
   comments: {
     pageInfo: PageInfo;
     nodes: GqlComment[];
@@ -88,6 +91,7 @@ export async function listReviewThreads(
                 viewerCanResolve
                 path
                 line
+                resolvedBy { login }
                 comments(first: 50) {
                   pageInfo { hasNextPage endCursor }
                   nodes {
@@ -144,6 +148,7 @@ export async function getReviewThread(
           viewerCanResolve
           path
           line
+          resolvedBy { login }
           comments(first: 50) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -172,6 +177,7 @@ async function materializeThread(
     viewerCanResolve: node.viewerCanResolve,
     path: node.path,
     line: node.line,
+    resolvedByLogin: node.resolvedBy?.login ?? null,
     comments: await loadAllComments(octokit, node),
   };
 }

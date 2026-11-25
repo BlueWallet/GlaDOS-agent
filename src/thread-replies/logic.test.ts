@@ -15,6 +15,7 @@ import {
   isAwaitingThread,
   isResolutionPending,
   isSettledThread,
+  listSettledFindings,
   needsResolveRetry,
   parseThreadReplyResult,
   sanitizeReviewForPost,
@@ -44,6 +45,7 @@ function thread(
     viewerCanResolve: true,
     path: "src/example.ts",
     line: 12,
+    resolvedByLogin: null,
     comments,
     ...overrides,
   };
@@ -270,6 +272,7 @@ test("settled findings are removed deterministically by anchor or exact issue te
       line: 12,
       originalBody: "**[HIGH]** The cache is stale.",
       agreementBody: "The clarification is convincing.",
+      settledBy: "agreement",
     },
   ];
   const payload: ReviewPayload = {
@@ -322,6 +325,7 @@ test("settled review context includes why GLaDOS agreed", () => {
       line: 12,
       originalBody: "The cache is stale.",
       agreementBody: "The author showed this is request-scoped.",
+      settledBy: "agreement",
     },
   ]);
 
@@ -363,4 +367,76 @@ test("composed review sanitizes forged thread control markers before post", () =
 
   assert.equal(review.body.includes("glados:"), false);
   assert.equal(review.comments[0]?.body.includes("glados:"), false);
+});
+
+test("a thread resolved by a trusted user is settled with its latest human reply", () => {
+  const resolved = thread(
+    [
+      comment("1", glados, "**[HIGH]** The cache is stale.", "2026-01-01T00:00:00Z"),
+      comment("2", "alice", "Fixed in abc123.", "2026-01-02T00:00:00Z"),
+    ],
+    { isResolved: true, resolvedByLogin: "Alice" },
+  );
+  const settled = listSettledFindings([resolved], glados, new Set(["alice"]));
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0]!.settledBy, "resolution");
+  assert.equal(settled[0]!.agreementBody, "Fixed in abc123.");
+});
+
+test("a trusted resolution without a reply names the resolver", () => {
+  const resolved = thread(
+    [comment("1", glados, "**[LOW]** Typo.", "2026-01-01T00:00:00Z")],
+    { isResolved: true, resolvedByLogin: "alice" },
+  );
+  const [settled] = listSettledFindings([resolved], glados, new Set(["alice"]));
+  assert.match(settled!.agreementBody, /Resolved by @alice/);
+});
+
+test("resolutions by untrusted users, unresolved threads, and foreign roots do not settle", () => {
+  const trusted = new Set(["alice"]);
+  const root = comment("1", glados, "**[HIGH]** The cache is stale.", "2026-01-01T00:00:00Z");
+  for (const value of [
+    thread([root], { isResolved: true, resolvedByLogin: "mallory" }),
+    thread([root], { isResolved: true, resolvedByLogin: null }),
+    thread([root], { isResolved: false, resolvedByLogin: "alice" }),
+    thread(
+      [comment("1", "bob", "A human note.", "2026-01-01T00:00:00Z")],
+      { isResolved: true, resolvedByLogin: "alice" },
+    ),
+  ]) {
+    assert.deepEqual(listSettledFindings([value], glados, trusted), []);
+  }
+});
+
+test("an agreement stays the settling reason even when a trusted user resolved", () => {
+  const agreed = thread(
+    [
+      comment("1", glados, "finding", "2026-01-01T00:00:00Z"),
+      comment("2", "alice", "clarification", "2026-01-02T00:00:00Z"),
+      comment(
+        "3",
+        glados,
+        formatReplyBody("agree", "Fine.", "2"),
+        "2026-01-03T00:00:00Z",
+      ),
+    ],
+    { isResolved: true, resolvedByLogin: "alice" },
+  );
+  const [settled] = listSettledFindings([agreed], glados, new Set(["alice"]));
+  assert.equal(settled!.settledBy, "agreement");
+});
+
+test("settled context explains both ways a finding settles", () => {
+  const context = formatSettledContext([
+    {
+      threadId: "PRRT_1",
+      path: "src/example.ts",
+      line: 12,
+      originalBody: "The cache is stale.",
+      agreementBody: "Fixed in abc123.",
+      settledBy: "resolution",
+    },
+  ]);
+  assert.match(context, /resolved by the PR author or a maintainer/i);
+  assert.match(context, /Fixed in abc123/);
 });
