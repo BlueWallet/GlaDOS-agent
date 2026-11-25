@@ -45,7 +45,15 @@ test("draft prompt is dry, strict, and covers the full review checklist", () => 
     assert.match(prompt, category);
   }
   assert.match(prompt, /Report every critical and high issue/i);
-  assert.match(prompt, /high: .*test gaps/i);
+  assert.doesNotMatch(prompt, /high: .*test gaps/i);
+  assert.match(prompt, /high \(blocking\): .*wrong money/i);
+  assert.match(prompt, /medium: .*without a test/i);
+  assert.match(prompt, /low: .*error messages/i);
+  assert.match(prompt, /wrong error message .* is low/i);
+  assert.match(prompt, /Do not raise the severity of a concern raised in an earlier round unless the code there got worse/i);
+  assert.match(prompt, /deliberately reuses an existing code path/i);
+  assert.match(prompt, /not as findings and not as follow-ups/i);
+  assert.doesNotMatch(prompt, /depends on it/i);
   assert.match(prompt, /silence is not permission/i);
   assert.doesNotMatch(prompt, /residual risk/i);
   assert.doesNotMatch(prompt, /missing niceties/i);
@@ -92,6 +100,12 @@ test("verify prompt checks candidates and applies voice only after verification"
   assert.match(prompt, /Portal/);
   assert.match(prompt, /110% over-the-top/i);
   assert.match(prompt, /Avoid bland phrases/i);
+  assert.match(prompt, /high \(blocking\): .*wrong money/i);
+  assert.match(prompt, /wrong error message .* is low/i);
+  assert.match(prompt, /deliberately reuses an existing code path/i);
+  assert.match(prompt, /out of scope for the PR's stated goal/i);
+  assert.doesNotMatch(prompt, /test gaps for changed behavior are valid high/i);
+  assert.doesNotMatch(prompt, /did not worsen or depend on/i);
 });
 
 test("voice prompt rewrites a clean draft without reopening the review", () => {
