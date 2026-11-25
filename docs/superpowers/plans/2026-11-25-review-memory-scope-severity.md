@@ -1,5 +1,7 @@
 # Review memory, scope rule, and impact severity — Implementation Plan
 
+> Revised after review: the `messageOnly` flag, the earlier-findings list, and `getPullRequestAuthor()` were removed; see the spec for the final design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** GLaDOS remembers earlier rounds (trusted resolutions, owner decisions, earlier findings), judges PRs against their stated scope, and labels severity by impact.

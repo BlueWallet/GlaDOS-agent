@@ -43,7 +43,7 @@ src/
     notifications.ts    # listNotifications(), markNotificationDone()
     pr.ts               # search review-requested PRs, pending-reviewer check, notification → PR ref
     diff.ts             # getCommentableLines() — RIGHT-side lines that accept comments
-    comments.ts         # listIssueComments(), getPullRequestAuthor()
+    comments.ts         # listIssueComments()
     permissions.ts      # isWriteAccess(), loadTrustedLogins() — who counts as the owner
     reviews.ts          # postGithubReview() — validate vs diff, then createReview
     threads.ts          # GraphQL: list/get review threads, reply, resolve (thread-replies I/O)
@@ -58,7 +58,7 @@ src/
     process.ts          # Phase A + compose with full review
     agent.ts            # runThreadReplies()
     logic.ts            # classification, markers, settled findings, topic suppress, Phase A prompt/parse
-    memory.ts           # owner decisions + earlier findings: selection, bounds, review-memory context
+    memory.ts           # owner decisions: selection, bounds; review-memory context
 ```
 
 Co-located `*.test.ts` files use Node’s built-in test runner (`npm test`).
@@ -91,7 +91,7 @@ cli/notifications.ts
          → withPrLock + withPrWorkspace
          → Phase A (processReviewThreads)
          → review memory: PR author, issue comments, permission lookups → trusted logins
-         → review/agent.runAgentReview(+ settled context, owner decisions, earlier findings)
+         → review/agent.runAgentReview(+ settled context, owner decisions)
          → suppressSettledFindings + sanitize markers
          → payload.buildGithubReview → reviews.postGithubReview
   → per PullRequest notification (wake-up only; GitHub coalesces PR activity):
@@ -128,14 +128,13 @@ Two agent passes, then optional settled-finding suppression:
 1. **Draft** (`buildReviewPrompt`, `grok-4.7` xhigh non-fast / `GLADOS_REVIEW_MODEL`) — dry technical findings. The prompt is a port of the superpowers `code-reviewer` template: checklist over plan alignment, code quality, architecture, testing, and production readiness, and every critical/high issue must be reported. If `findings` is empty, skip verify and run a GLaDOS voice rewrite of the summary (`buildVoicePrompt`) on the verify model.
 2. **Verify** (`buildVerifyPrompt`, `grok-4.7` xhigh non-fast, fresh context) — re-read callees, drop disproven candidates, rewrite kept text in GLaDOS voice. Candidate IDs let `mergeVerifiedFindings()` restore the original anchors and cap severity; unknown or duplicate IDs fail the review. Dropped candidates are returned in `dropped` with evidence; a `critical`/`high` candidate dropped without evidence is restored with its draft severity and body (`undisprovenBlockers()`), and one lowered below `high` without `evidence` keeps its draft severity. Evidence is checked only for visible text, not for truth — the dropped-candidate log lines are the audit trail. Unknown, duplicate, or kept-and-dropped ids in `dropped` fail the review. `GLADOS_VERIFY_MODEL` overrides the verify pass. Voice uses this model too.
 
-**Severity** (`SEVERITY_RUBRIC`, impact based, shared by draft and verify): `critical` = security, loss of funds, data loss, broken core functionality. `high` (blocking) = wrong money/amount or signature handling, data loss, or a crash/hang on a path users can actually hit. `medium` = a real bug on an unlikely path, or changed behavior without a test. `low` = error messages, wording, docs, style. Calibration examples live in the rubric. No escalation: a concern from an earlier round keeps its severity unless the code there got worse. Verify may set `"messageOnly": true` to lower a message-only blocker to `low` without `evidence`.
+**Severity** (`SEVERITY_RUBRIC`, impact based, shared by draft and verify): `critical` = security, loss of funds, data loss, broken core functionality. `high` (blocking) = wrong money/amount or signature handling, data loss, or a crash/hang on a path users can actually hit. `medium` = a real bug on an unlikely path, or changed behavior without a test. `low` = error messages, wording, docs, style. Calibration examples live in the rubric. No escalation: a concern from an earlier round keeps its severity unless the code there got worse. A message-only blocker may be lowered to `low` with the affected message as its `evidence`.
 
 **Scope** (`SCOPE_RULES`): the PR is judged against its stated goal/spec (title, body, spec docs in the diff). Matching the current behavior of an existing path the PR deliberately reuses is correct. Out-of-scope and pre-existing issues are dropped entirely — not findings, not follow-ups.
 
 **Review memory** (composed with thread replies, `thread-replies/memory.ts`): before each full review GLaDOS loads the PR author, conversation comments, and permissions (`getCollaboratorPermissionLevel`; `admin`/`write` permission or `admin`/`maintain`/`write` role; GLaDOS and bots never count; failed lookups are untrusted). It injects as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`:
-- settled findings (original body + why: GLaDOS agreement, or the latest trusted reply on a thread resolved by a trusted user; 600/300 chars each, 16,000 total);
-- owner decisions: conversation comments and thread replies by trusted humans, newest kept, 1,500 chars each, 12,000 total — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm;
-- earlier unsettled GLaDOS findings (8,000 chars) so severity does not escalate.
+- settled findings (original body + why: GLaDOS agreement, or the latest trusted reply on a thread resolved by a trusted user; 600 chars per text, 16,000 total, newest kept);
+- owner decisions: conversation comments and replies on unsettled threads by trusted humans, newest kept, 1,500 chars each, 12,000 total — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm.
 
 Settled repeats are suppressed before verification and again before posting: same path and exact text, or the same code topic (≥ 2 shared identifiers covering ≥ 60% of the smaller set). Open/disagreed threads do **not** suppress new findings. If memory cannot load, the review falls back to agreements only.
 
@@ -168,7 +167,7 @@ Settled repeats are suppressed before verification and again before posting: sam
 | Severity levels | `review/payload.ts` → `SEVERITIES` + `Severity` |
 | GLaDOS voice | `review/payload.ts` → `buildVerifyPrompt()`; `applyPersonality()` still wraps at post time |
 | Thread reply prompt / classification / suppress | `thread-replies/logic.ts` |
-| Owner decisions / earlier findings / memory bounds | `thread-replies/memory.ts` |
+| Owner decisions / memory bounds | `thread-replies/memory.ts` |
 | Severity rubric / scope rule | `review/payload.ts` → `SEVERITY_RUBRIC` / `SCOPE_RULES` |
 | Phase A + compose with review | `thread-replies/process.ts` |
 | Core review wiring | `review/process.ts` (no business logic) |
