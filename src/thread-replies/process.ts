@@ -126,7 +126,8 @@ export async function processPrReviewWithThreadReplies(
 
 /**
  * Settled findings plus owner decisions for the review prompt. `author` is
- * empty when PR context failed to load; then only write access counts. Memory is an aid: if loading it fails, fall back to agreements only.
+ * empty when PR context failed to load; then only write access counts.
+ * Memory is an aid: if loading it fails, fall back to agreements only.
  */
 async function loadReviewMemory(
   githubToken: string,
