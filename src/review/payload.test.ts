@@ -425,3 +425,8 @@ test("draft and verify prompts carry the reading rules without dropping the chec
     /If the diff is too large for one pass, review it in several passes yourself/,
   );
 });
+
+test("a memory-based drop must still name the candidate's file", () => {
+  const prompt = buildVerifyPrompt("https://example.test/pr/1", draft, "Settled: x");
+  assert.match(prompt, /cite that context and the candidate's file as evidence/);
+});

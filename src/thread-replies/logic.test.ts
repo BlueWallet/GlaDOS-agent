@@ -599,3 +599,17 @@ test("a bot that resolves a thread never settles it, even with a trusted login",
   const resolved = thread([root], { isResolved: true, resolvedByLogin: "deploy-app", resolvedByIsBot: true });
   assert.deepEqual(listSettledFindings([resolved], glados, new Set(["deploy-app"])), []);
 });
+
+test("settled budget counts the encoded size", () => {
+  const heavy: SettledFinding[] = Array.from({ length: 60 }, (_, index) => ({
+    threadId: `PRRT_${index}`,
+    path: "src/a.ts",
+    line: index,
+    originalBody: "<".repeat(600),
+    agreementBody: "&".repeat(600),
+    settledBy: "resolution",
+    createdAt: "2026-01-01T00:00:00Z",
+  }));
+  const context = formatSettledContext(heavy);
+  assert.ok(context.length <= 16_000 + 2_000, `context is ${context.length} chars`);
+});

@@ -197,12 +197,12 @@ export function formatSettledContext(settled: SettledFinding[]): string {
   ].join("\n");
 }
 
-/** Keep items from the end (newest last) while their JSON fits the budget; return in input order. */
+/** Keep items from the end (newest last) while their encoded JSON fits the budget; return in input order. */
 export function newestWithinBudget<T>(items: T[], budget: number): T[] {
   const kept: T[] = [];
   let used = 0;
   for (const item of [...items].reverse()) {
-    const size = JSON.stringify(item).length;
+    const size = encodeUntrustedPromptData(JSON.stringify(item)).length;
     if (used + size > budget) break;
     kept.push(item);
     used += size;

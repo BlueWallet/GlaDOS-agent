@@ -250,7 +250,7 @@ export function buildVerifyPrompt(
     "- the claimed throw, return, or error path is false after reading the called functions",
     "- it is medium or low and is only speculation or a matter of taste",
     ...(extraContext
-      ? ["- the additional context below rules it out; cite that context as evidence"]
+      ? ["- the additional context below rules it out; cite that context and the candidate's file as evidence"]
       : []),
     "",
     ...SEVERITY_RUBRIC,
