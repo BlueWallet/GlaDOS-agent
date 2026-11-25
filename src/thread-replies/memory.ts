@@ -1,6 +1,9 @@
+import { isBotLogin } from "../github/permissions.js";
 import type { ReviewThread } from "../github/threads.js";
 import {
   encodeUntrustedPromptData,
+  formatSettledContext,
+  listSettledFindings,
   stripGladosControlMarkers,
   type SettledFinding,
 } from "./logic.js";
@@ -22,10 +25,6 @@ export const EARLIER_FINDING_MAX_CHARS = 600;
 export const EARLIER_FINDINGS_MAX_CHARS = 8_000;
 
 const SEVERITY_TAG = /^\s*\*\*\[(CRITICAL|HIGH|MEDIUM|LOW)\]\*\*\s*/i;
-
-export function isBotLogin(login: string): boolean {
-  return /\[bot\]$/i.test(login);
-}
 
 /** Replies (never roots) on every review thread, tagged with the thread path. */
 export function threadReplies(threads: ReviewThread[]): ConversationComment[] {
@@ -144,4 +143,60 @@ function newestWithinBudget<T>(
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
+}
+
+/**
+ * Logins whose trust matters: resolvers of GLaDOS threads, and human authors
+ * of thread replies and conversation comments.
+ */
+export function trustCandidates(
+  threads: ReviewThread[],
+  issueComments: ConversationComment[],
+  gladosLogin: string,
+): Set<string> {
+  const glados = gladosLogin.toLowerCase();
+  const logins = new Set<string>();
+  for (const thread of threads) {
+    const rootByGlados = thread.comments[0]?.authorLogin.toLowerCase() === glados;
+    if (rootByGlados && thread.isResolved && thread.resolvedByLogin) {
+      logins.add(thread.resolvedByLogin);
+    }
+  }
+  for (const comment of [...threadReplies(threads), ...issueComments]) {
+    if (!comment.authorIsBot && comment.authorLogin) logins.add(comment.authorLogin);
+  }
+  return logins;
+}
+
+export interface ReviewMemory {
+  settled: SettledFinding[];
+  context: string;
+}
+
+/** Settled findings (agreements first) and the full prompt appendix. */
+export function buildReviewMemory(input: {
+  threads: ReviewThread[];
+  gladosLogin: string;
+  agreed: SettledFinding[];
+  issueComments: ConversationComment[];
+  trusted: ReadonlySet<string>;
+}): ReviewMemory {
+  const byId = new Map(input.agreed.map((item) => [item.threadId, item]));
+  for (const item of listSettledFindings(input.threads, input.gladosLogin, input.trusted)) {
+    if (!byId.has(item.threadId)) byId.set(item.threadId, item);
+  }
+  const settled = [...byId.values()];
+  const decisions = selectOwnerDecisions(
+    [...input.issueComments, ...threadReplies(input.threads)],
+    input.trusted,
+    input.gladosLogin,
+  );
+  return {
+    settled,
+    context: formatReviewMemory([
+      formatSettledContext(settled),
+      formatOwnerDecisions(decisions),
+      formatEarlierFindings(input.threads, settled, input.gladosLogin),
+    ]),
+  };
 }

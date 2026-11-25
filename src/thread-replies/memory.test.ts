@@ -3,6 +3,8 @@ import test from "node:test";
 import type { ReviewThread, ReviewThreadComment } from "../github/threads.js";
 import { AGREE_MARKER, type SettledFinding } from "./logic.js";
 import {
+  buildReviewMemory,
+  trustCandidates,
   formatEarlierFindings,
   formatOwnerDecisions,
   formatReviewMemory,
@@ -138,4 +140,59 @@ test("earlier findings list unsettled GLaDOS roots with their severity", () => {
 test("review memory joins only non-empty parts", () => {
   assert.equal(formatReviewMemory(["", "a", "", "b"]), "a\n\nb");
   assert.equal(formatReviewMemory(["", ""]), "");
+});
+
+test("trust candidates are resolvers of GLaDOS threads and human commenters", () => {
+  const threads = [
+    thread(
+      "PRRT_1",
+      [
+        threadComment("1", glados, "**[HIGH]** finding", "2026-01-01T00:00:00Z"),
+        threadComment("2", "Alice", "Fixed.", "2026-01-02T00:00:00Z"),
+        { ...threadComment("3", "coderabbitai", "Bot reply.", "2026-01-03T00:00:00Z"), authorIsBot: true },
+      ],
+      { isResolved: true, resolvedByLogin: "Maint" },
+    ),
+    thread("PRRT_2", [threadComment("4", "bob", "Human root.", "2026-01-01T00:00:00Z")], {
+      isResolved: true,
+      resolvedByLogin: "eve",
+    }),
+  ];
+  const candidates = trustCandidates(threads, [said("9", "carol", "Decision."), said("10", "bot", "x", undefined, true)], glados);
+  assert.deepEqual([...candidates].sort(), ["Alice", "Maint", "carol"]);
+});
+
+test("review memory merges agreements with trusted resolutions and builds one context", () => {
+  const root = threadComment("1", glados, "**[HIGH]** `cacheKey` ignores `userId`.", "2026-01-01T00:00:00Z");
+  const reply = threadComment("2", "alice", "Declined: request-scoped.", "2026-01-02T00:00:00Z");
+  const threads = [
+    thread("PRRT_1", [root, reply], { isResolved: true, resolvedByLogin: "alice" }),
+    thread("PRRT_2", [{ ...root, id: "5", body: "**[LOW]** Still open." }]),
+  ];
+  const agreed: SettledFinding = {
+    threadId: "PRRT_9",
+    path: "src/b.ts",
+    line: 1,
+    originalBody: "old",
+    agreementBody: "agreed",
+    settledBy: "agreement",
+  };
+  const memory = buildReviewMemory({
+    threads,
+    gladosLogin: glados,
+    agreed: [agreed],
+    issueComments: [said("7", "alice", "Owner decision: parity with hot sends.")],
+    trusted: new Set(["alice"]),
+  });
+  assert.deepEqual(
+    memory.settled.map((item) => [item.threadId, item.settledBy]),
+    [
+      ["PRRT_9", "agreement"],
+      ["PRRT_1", "resolution"],
+    ],
+  );
+  assert.match(memory.context, /Declined: request-scoped/);
+  assert.match(memory.context, /parity with hot sends/);
+  assert.match(memory.context, /Still open/);
+  assert.doesNotMatch(memory.context, /EARLIER_FINDINGS[\s\S]*cacheKey/);
 });

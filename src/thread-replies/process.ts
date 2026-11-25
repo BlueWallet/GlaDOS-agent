@@ -9,6 +9,11 @@ import {
   resolveReviewThread,
   type ReviewThread,
 } from "../github/threads.js";
+import { getPullRequestAuthor, listIssueComments } from "../github/comments.js";
+import {
+  loadTrustedLogins,
+  repositoryPermissionLookup,
+} from "../github/permissions.js";
 import { isReviewRequestedForUser } from "../github/pr.js";
 import { postGithubReview } from "../github/reviews.js";
 import { runAgentReview } from "../review/agent.js";
@@ -16,6 +21,11 @@ import { buildGithubReview } from "../review/payload.js";
 import { logReviewError } from "../review/process.js";
 import type { PullRequestRef } from "../types.js";
 import { runThreadReplies } from "./agent.js";
+import {
+  buildReviewMemory,
+  trustCandidates,
+  type ReviewMemory,
+} from "./memory.js";
 import {
   assertCurrentThreadSnapshots,
   formatReplyBody,
@@ -32,6 +42,8 @@ import {
 export interface ThreadProcessResult {
   settled: SettledFinding[];
   complete: boolean;
+  /** Thread state Phase A started from; review memory is built from it. */
+  state: ThreadState;
 }
 
 interface ThreadState {
@@ -74,20 +86,22 @@ export async function processPrReviewWithThreadReplies(
             repoDir,
           });
 
+          const memory = await loadReviewMemory(
+            options.githubToken,
+            pr,
+            threadResult,
+          );
+
           console.log(`  Reviewing ${pr.prUrl} ...`);
-          const settledContext = formatSettledContext(threadResult.settled);
           const payload = await runAgentReview(
             repoDir,
             pr.prUrl,
             options.cursorApiKey,
-            settledContext,
-            (draft) => suppressSettledFindings(draft, threadResult.settled),
+            memory.context,
+            (draft) => suppressSettledFindings(draft, memory.settled),
             await tryLoadPrContext(options.githubToken, pr, repoDir),
           );
-          const filtered = suppressSettledFindings(
-            payload,
-            threadResult.settled,
-          );
+          const filtered = suppressSettledFindings(payload, memory.settled);
           const suppressed =
             payload.findings.length - filtered.findings.length;
           if (suppressed > 0) {
@@ -105,6 +119,48 @@ export async function processPrReviewWithThreadReplies(
   } catch (err) {
     logReviewError(err);
     return false;
+  }
+}
+
+/**
+ * Settled findings plus owner decisions and earlier findings for the review
+ * prompt. Memory is an aid: if loading it fails, fall back to agreements only.
+ */
+async function loadReviewMemory(
+  githubToken: string,
+  pr: PullRequestRef,
+  threadResult: ThreadProcessResult,
+): Promise<ReviewMemory> {
+  const { login, threads } = threadResult.state;
+  try {
+    const [author, issueComments] = await Promise.all([
+      getPullRequestAuthor(githubToken, pr),
+      listIssueComments(githubToken, pr),
+    ]);
+    const trusted = await loadTrustedLogins(
+      repositoryPermissionLookup(githubToken, pr),
+      author,
+      trustCandidates(threads, issueComments, login),
+      login,
+    );
+    const memory = buildReviewMemory({
+      threads,
+      gladosLogin: login,
+      agreed: threadResult.settled,
+      issueComments,
+      trusted,
+    });
+    console.log(
+      `  Review memory: ${memory.settled.length} settled finding(s), ${trusted.size} trusted login(s), ${memory.context.length} chars`,
+    );
+    return memory;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`  Review memory unavailable, using agreements only: ${message}`);
+    return {
+      settled: threadResult.settled,
+      context: formatSettledContext(threadResult.settled),
+    };
   }
 }
 
@@ -178,7 +234,7 @@ async function processThreadState(
   );
   if (awaiting.length === 0) {
     console.log("  No review threads awaiting a reply");
-    return { settled: [...settledById.values()], complete };
+    return { settled: [...settledById.values()], complete, state };
   }
   if (!options.repoDir) {
     throw new Error("Thread replies require a prepared PR workspace");
@@ -227,7 +283,7 @@ async function processThreadState(
     if (!result.complete) complete = false;
   }
 
-  return { settled: [...settledById.values()], complete };
+  return { settled: [...settledById.values()], complete, state };
 }
 
 async function retryPendingResolutions(
