@@ -13,7 +13,7 @@ export interface SettledFinding {
   path: string;
   line: number | null;
   originalBody: string;
-  /** Why it settled: GLaDOS's agreement, or the latest human reply on a trusted resolution. */
+  /** Why it settled: GLaDOS's agreement, or the latest trusted reply on a trusted resolution. */
   agreementBody: string;
   settledBy: "agreement" | "resolution";
 }

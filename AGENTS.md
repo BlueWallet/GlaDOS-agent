@@ -133,7 +133,7 @@ Two agent passes, then optional settled-finding suppression:
 **Scope** (`SCOPE_RULES`): the PR is judged against its stated goal/spec (title, body, spec docs in the diff). Matching the current behavior of an existing path the PR deliberately reuses is correct. Out-of-scope and pre-existing issues are dropped entirely — not findings, not follow-ups.
 
 **Review memory** (composed with thread replies, `thread-replies/memory.ts`): before each full review GLaDOS loads the PR author, conversation comments, and permissions (`getCollaboratorPermissionLevel`; `admin`/`write` permission or `admin`/`maintain`/`write` role; GLaDOS and bots never count; failed lookups are untrusted). It injects as `extraContext` into both `buildReviewPrompt()` and `buildVerifyPrompt()`:
-- settled findings (original body + why: GLaDOS agreement, or the latest human reply on a thread resolved by a trusted user; 600/300 chars each, 16,000 total);
+- settled findings (original body + why: GLaDOS agreement, or the latest trusted reply on a thread resolved by a trusted user; 600/300 chars each, 16,000 total);
 - owner decisions: conversation comments and thread replies by trusted humans, newest kept, 1,500 chars each, 12,000 total — do not re-raise what the owner declined or deferred, do not reopen a decision without new evidence of concrete harm;
 - earlier unsettled GLaDOS findings (8,000 chars) so severity does not escalate.
 
