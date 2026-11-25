@@ -302,7 +302,8 @@ test("settled findings are removed by path and exact issue text or code topic", 
   };
 
   const filtered = suppressSettledFindings(payload, settled);
-  assert.equal(filtered.summary.includes("cache is stale"), false);
+  // Findings remain, so the summary is left for verify to rewrite.
+  assert.equal(filtered.summary, payload.summary);
   assert.deepEqual(filtered.findings, [
     {
       severity: "high",
@@ -534,4 +535,54 @@ test("a trusted resolution never uses an untrusted reply as its reason", () => {
   );
   const [settled] = listSettledFindings([resolved], glados, new Set(["alice"]));
   assert.equal(settled!.agreementBody, "Deferred to a follow-up.");
+});
+
+function settledAt(path: string, originalBody: string): SettledFinding {
+  return {
+    threadId: "PRRT_T",
+    path,
+    line: 1,
+    originalBody,
+    agreementBody: "Fixed.",
+    settledBy: "resolution",
+  };
+}
+
+test("ubiquitous tokens do not make two findings the same topic", () => {
+  const finding = { severity: "high" as const, path: "src/a.ts", line: 9, body: "`save` returns `null` on `error`." };
+  const filtered = suppressSettledFindings(
+    { summary: "s", findings: [finding] },
+    [settledAt("src/a.ts", "**[HIGH]** `parse` returns `null` on `error`.")],
+  );
+  assert.deepEqual(filtered.findings, [finding]);
+});
+
+test("fenced code blocks do not feed code topics", () => {
+  assert.deepEqual(
+    [...codeTopics("Look:\n```kotlin\nfun cacheKey(userId: String) = userId\n```\nthen `cacheKey`.")],
+    ["cachekey"],
+  );
+});
+
+test("a finding that names identifiers the settled text lacks is kept", () => {
+  const finding = {
+    severity: "medium" as const,
+    path: "src/SignedPsbt.kt",
+    line: 120,
+    body: "`Psbt.read` fails before `inputSignatures`, and `finalTx` then drops the witness.",
+  };
+  const filtered = suppressSettledFindings({ summary: "s", findings: [finding] }, [settledPsbt]);
+  assert.deepEqual(filtered.findings, [finding]);
+});
+
+test("suppressing every finding says so in the summary", () => {
+  const filtered = suppressSettledFindings(
+    {
+      summary: "One defect.",
+      findings: [{ severity: "high", path: "src/a.ts", line: 1, body: "The cache is stale." }],
+    },
+    [settledAt("src/a.ts", "**[HIGH]** The cache is stale.")],
+  );
+  assert.deepEqual(filtered.findings, []);
+  assert.match(filtered.summary, /1 finding repeated a settled issue/);
 });

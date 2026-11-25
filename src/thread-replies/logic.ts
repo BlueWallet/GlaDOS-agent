@@ -369,45 +369,60 @@ export function suppressSettledFindings(
     });
   });
 
-  if (findings.length === payload.findings.length) return payload;
-  const count = findings.length;
-  const summary =
-    count === 0
-      ? "The disputed test result stays retired. No new defects survived examination."
-      : `The settled test result stays retired. ${count} new defect${count === 1 ? "" : "s"} remain below for continued testing.`;
-  return { summary, findings };
+  const removed = payload.findings.length - findings.length;
+  if (removed === 0) return payload;
+  // Verify rewrites the summary of whatever remains; only an emptied draft needs one.
+  if (findings.length > 0) return { summary: payload.summary, findings };
+  return {
+    summary: `${removed} finding${removed === 1 ? "" : "s"} repeated a settled issue and stayed retired. No new defects survived examination.`,
+    findings,
+  };
 }
 
 const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
 const CODE_WORD = /[A-Za-z_][\w.]*\w/g;
 const CODE_SHAPED = /[a-z][A-Z]|_|\./;
+const FENCED_BLOCK = /```[\s\S]*?(?:```|$)/g;
+/** Tokens too common in findings to say what a finding is about. */
+const COMMON_TOKENS = new Set([
+  "null", "nil", "none", "undefined", "true", "false", "error", "errors",
+  "exception", "throw", "throws", "return", "returns", "string", "int",
+  "long", "bool", "boolean", "void", "this", "self", "value", "result",
+  "list", "map", "set", "get", "new", "var", "val", "let", "const", "fun",
+  "function", "type", "class", "object", "data",
+]);
 
 /**
- * Code identifiers a finding talks about: everything inside backtick spans,
- * plus camelCase, snake_case, and dotted words outside them. Lowercased,
- * at least 3 characters. Prose words do not count.
+ * Code identifiers a finding talks about: inline backtick spans, plus
+ * camelCase, snake_case, and dotted words outside them. Fenced blocks and
+ * ubiquitous tokens do not count. Lowercased, at least 3 characters.
  */
 export function codeTopics(text: string): Set<string> {
   const topics = new Set<string>();
   const add = (fragment: string) => {
     for (const word of fragment.match(IDENTIFIER) ?? []) {
-      if (word.length >= 3) topics.add(word.toLowerCase());
+      const token = word.toLowerCase();
+      if (token.length >= 3 && !COMMON_TOKENS.has(token)) topics.add(token);
     }
   };
-  for (const span of text.matchAll(/`([^`]+)`/g)) add(span[1]!);
-  for (const word of text.replace(/`[^`]*`/g, " ").match(CODE_WORD) ?? []) {
+  const prose = text.replace(FENCED_BLOCK, " ");
+  for (const span of prose.matchAll(/`([^`\n]+)`/g)) add(span[1]!);
+  for (const word of prose.replace(/`[^`\n]*`/g, " ").match(CODE_WORD) ?? []) {
     if (CODE_SHAPED.test(word)) add(word);
   }
   return topics;
 }
 
-/** Same topic: at least 2 shared identifiers covering 60% of the smaller set. */
-function sameTopic(a: string, b: string): boolean {
-  const left = codeTopics(a);
-  const right = codeTopics(b);
-  let shared = 0;
-  for (const topic of left) if (right.has(topic)) shared += 1;
-  return shared >= 2 && shared / Math.min(left.size, right.size) >= 0.6;
+/**
+ * A finding repeats a settled one when it names at least 2 identifiers, all of
+ * them already in the settled text, covering at least half of that text's.
+ */
+function sameTopic(finding: string, settled: string): boolean {
+  const named = codeTopics(finding);
+  const known = codeTopics(settled);
+  if (named.size < 2) return false;
+  for (const topic of named) if (!known.has(topic)) return false;
+  return named.size / known.size >= 0.5;
 }
 
 /** Format reply body for GitHub; append agree marker when agreeing. */

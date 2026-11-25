@@ -100,17 +100,20 @@ export async function processPrReviewWithThreadReplies(
             pr.prUrl,
             options.cursorApiKey,
             memory.context,
-            (draft) => suppressSettledFindings(draft, memory.settled),
+            // Suppress on the draft only: verify cannot add findings, and its
+            // rewritten bodies must not be re-matched.
+            (draft) => {
+              const filtered = suppressSettledFindings(draft, memory.settled);
+              const suppressed = draft.findings.length - filtered.findings.length;
+              if (suppressed > 0) {
+                console.log(`  Suppressed ${suppressed} settled finding(s)`);
+              }
+              return filtered;
+            },
             prContext,
           );
-          const filtered = suppressSettledFindings(payload, memory.settled);
-          const suppressed =
-            payload.findings.length - filtered.findings.length;
-          if (suppressed > 0) {
-            console.log(`  Suppressed ${suppressed} settled finding(s)`);
-          }
 
-          const review = sanitizeReviewForPost(buildGithubReview(filtered));
+          const review = sanitizeReviewForPost(buildGithubReview(payload));
           console.log(`  Verdict: ${review.event}`);
           console.log(`  ${review.comments.length} inline comment(s)`);
           await postGithubReview(options.githubToken, pr, review);
